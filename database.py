@@ -1,4 +1,12 @@
 from sqlmodel import SQLModel, create_engine, Session
+# Delay import to avoid circular import
+def import_stat_model():
+    from models import StatLevelRequirement
+    return StatLevelRequirement
+
+
+
+
 
 # SQLite for local dev (use PostgreSQL later)
 DATABASE_URL = "sqlite:///./tactera.db"
@@ -13,4 +21,6 @@ def get_session():
 
 # Create tables
 def init_db():
+    StatLevelRequirement = import_stat_model()
     SQLModel.metadata.create_all(engine)
+

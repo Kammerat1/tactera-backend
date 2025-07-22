@@ -1,4 +1,4 @@
-from sqlmodel import SQLModel, Field, Relationship
+from sqlmodel import SQLModel, Field, Relationship, select
 from typing import Optional, List
 from pydantic import BaseModel
 from datetime import datetime
@@ -98,3 +98,58 @@ class TrainingGround(SQLModel, table=True):
 
     # Optional: Link back to club later if needed
     # club: Optional[Club] = Relationship(back_populates="training_ground")
+
+from sqlmodel import SQLModel, Field
+
+class StatLevelRequirement(SQLModel, table=True):
+    level: int = Field(primary_key=True)
+    xp_required: int
+
+from sqlmodel import Session
+from database import engine
+
+def seed_level_requirements():
+    """
+    Fills the StatLevelRequirement table with XP thresholds for each level.
+    Levels 1–10 increase by a flat 50 XP.
+    Levels 11+ increase incrementally by 10 XP per level.
+    """
+    from models import StatLevelRequirement
+    with Session(engine) as session:
+        # Check if already seeded
+        count = session.exec(select(StatLevelRequirement)).all()
+        if count:
+            return
+
+        levels = []
+        xp = 0
+
+        for level in range(1, 101):
+            if level <= 10:
+                xp_required = (level - 1) * 50
+            else:
+                increment = 50 + (level - 11) * 10
+                xp_required += increment
+
+            levels.append(StatLevelRequirement(level=level, xp_required=xp_required))
+
+        session.add_all(levels)
+        session.commit()
+
+
+#TEMPORARY FUNCTION FOR READING EXCEL FILES
+from sqlmodel import delete
+from sqlalchemy.exc import SQLAlchemyError
+
+def reset_statlevel_table(session: Session):
+    """
+    Completely clears the statlevelrequirement table.
+    Only use this before re-seeding.
+    """
+    try:
+        session.exec(delete(StatLevelRequirement))
+        session.commit()
+        print("✅ statlevelrequirement table cleared.")
+    except SQLAlchemyError as e:
+        session.rollback()
+        print("❌ Failed to clear table:", e)
