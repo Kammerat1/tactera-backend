@@ -1,109 +1,144 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+# club.py
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlmodel import Session, select
+from models import Club, Player, TrainingGround
+from database import get_session
+from club_models import ClubRegister
 import random
 
 router = APIRouter()
 
-# Temporary in-memory "database" for clubs
-club_db = {}
+@router.post("/register")
+def register_club(data: ClubRegister, session: Session = Depends(get_session)):
+    # Step 1: Check if the manager already has a club
+    existing_club = session.exec(
+        select(Club).where(Club.manager_email == data.manager_email)
+    ).first()
+    if existing_club:
+        raise HTTPException(status_code=400, detail="Manager already has a club.")
 
-# === Models ===
+    # Step 2: Create the club
+    new_club = Club(
+        club_name=data.club_name,
+        manager_email=data.manager_email
+    )
+    session.add(new_club)
+    session.commit()
+    session.refresh(new_club)  # This gives us new_club.id
 
-# A single player in the squad
-class Player(BaseModel):
-    name: str
-    position: str
-    pace: int
-    passing: int
-    defending: int
-
-# A club owned by a manager
-class Club(BaseModel):
-    manager_email: str
-    club_name: str
-    squad: list[Player]
-
-# === Helper Data ===
-
-POSITIONS = ["GK", "LB", "CB", "RB", "CDM", "CM", "CAM", "LW", "RW", "ST"]
-NAMES = ["Renzo", "Silas", "Toma", "Lior", "Marek", "Niko", "Otto", "Sami", "Jari", "Eryk", "Kai", "Levi", "Rafi"]
-
-# === Squad Generator Function ===
-
-def generate_squad() -> list[Player]:
-    """Creates a list of 11 fictional players with random stats and positions."""
-    squad = []
-    used_names = set()
-
+    # Step 3: Create 11 players linked to this club
     for i in range(11):
-        name = random.choice(NAMES)
-        while name in used_names:
-            name = random.choice(NAMES)
-        used_names.add(name)
-
-        position = POSITIONS[i % len(POSITIONS)]
-        pace = random.randint(40, 95)
-        passing = random.randint(40, 95)
-        defending = random.randint(40, 95)
-
         player = Player(
-            name=name,
-            position=position,
-            pace=pace,
-            passing=passing,
-            defending=defending
+            name=f"Player {i+1}",
+            pace=random.randint(50, 99),
+            passing=random.randint(50, 99),
+            defending=random.randint(50, 99),
+            pace_xp=random.randint(0, 99),        # Optional: random starting XP
+            passing_xp=random.randint(0, 99),
+            defending_xp=random.randint(0, 99),
+            club_id=new_club.id
         )
-        squad.append(player)
-    
-    return squad
+        session.add(player)
 
-# === Routes ===
+    # Step 4: Create the training ground
+    training_ground = TrainingGround(
+        club_id=new_club.id,
+        level=1,
+        tier="Basic",
+        xp_boost=3
+    )
+    session.add(training_ground)
 
-@router.post("/create")
-def create_club(manager_email: str, club_name: str):
-    """
-    Creates a club and assigns it to a manager.
-    Generates a squad of 11 fictional players.
-    """
-    if manager_email in club_db:
-        raise HTTPException(status_code=400, detail="Club already exists for this manager.")
+    # Step 5: Final commit (saves players + training ground)
+    session.commit()
 
-    squad = generate_squad()
-    new_club = Club(manager_email=manager_email, club_name=club_name, squad=squad)
-    club_db[manager_email] = new_club
-    return {"message": f"Club '{club_name}' created successfully", "squad": squad}
+    return {
+        "message": "Club, squad, and training ground created successfully.",
+        "club_id": new_club.id
+    }
 
-@router.get("/{manager_email}")
-def get_club(manager_email: str):
-    """
-    Retrieves the club and squad for a given manager by email.
-    """
-    club = club_db.get(manager_email)
+# === TRAINING ENDPOINT ===
+
+@router.post("/{club_id}")
+def train_club(club_id: int, session: Session = Depends(get_session)):
+    # Step 1: Fetch the club
+    club = session.get(Club, club_id)
     if not club:
         raise HTTPException(status_code=404, detail="Club not found.")
-    return club
 
-# === PRELOAD TEST CLUBS ===
+    # Step 2: Get the club's training ground
+    training_ground = session.exec(
+        select(TrainingGround).where(TrainingGround.club_id == club_id)
+    ).first()
+    if not training_ground:
+        raise HTTPException(status_code=404, detail="Training ground not found.")
 
-def preload_test_clubs():
-    """
-    Generates two always-available test clubs for dev use.
-    """
-    if "test1@tactera.dev" not in club_db:
-        squad_a = generate_squad()
-        club_db["test1@test.dk"] = Club(
-            manager_email="test1@tactera.dev",
-            club_name="Tactera United",
-            squad=squad_a
-        )
-    
-    if "test2@tactera.dev" not in club_db:
-        squad_b = generate_squad()
-        club_db["test2@test.dk"] = Club(
-            manager_email="test2@tactera.dev",
-            club_name="FC Dev Mode",
-            squad=squad_b
-        )
+    # Step 3: Get the squad
+    players = session.exec(
+        select(Player).where(Player.club_id == club_id)
+    ).all()
+    if not players:
+        raise HTTPException(status_code=400, detail="Squad is empty.")
 
-# Call this function when club.py is imported
-preload_test_clubs()
+    # Step 4: Apply training
+    xp_gain = training_ground.xp_boost
+    updated_players = []
+
+    def required_xp(stat_value: int) -> int:
+        if stat_value <= 10:
+            return 100
+        return 100 + (stat_value - 10) * 10
+
+    for player in players:
+        # === Pace ===
+        player.pace_xp += xp_gain
+        while True:
+            required = required_xp(player.pace)
+            if player.pace_xp < required:
+                break
+            player.pace_xp -= required
+            player.pace += 1
+
+        # === Passing ===
+        player.passing_xp += xp_gain
+        while True:
+            required = required_xp(player.passing)
+            if player.passing_xp < required:
+                break
+            player.passing_xp -= required
+            player.passing += 1
+
+        # === Defending ===
+        player.defending_xp += xp_gain
+        while True:
+            required = required_xp(player.defending)
+            if player.defending_xp < required:
+                break
+            player.defending_xp -= required
+            player.defending += 1
+
+        session.add(player)
+
+        updated_players.append({
+            "player_id": player.id,
+            "name": player.name,
+            "pace": player.pace,
+            "pace_xp": player.pace_xp,
+            "passing": player.passing,
+            "passing_xp": player.passing_xp,
+            "defending": player.defending,
+            "defending_xp": player.defending_xp
+        })
+
+    # Step 5: Save changes and return
+    session.commit()
+
+    return {
+        "xp_gain": xp_gain,
+        "players_trained": updated_players
+    }
+
+
+
+    session.commit()

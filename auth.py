@@ -1,26 +1,39 @@
-from fastapi import APIRouter, HTTPException
-from models import ManagerRegister, ManagerLogin
-from utils import hash_password, verify_password
+from fastapi import APIRouter, HTTPException, Depends
+from sqlmodel import Session, select
+from passlib.context import CryptContext
+
+from database import get_session
+from models import Manager, ManagerRegister, ManagerLogin
 
 router = APIRouter()
-fake_db = {}  # TEMPORARY storage (replaces database for now)
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+# === REGISTER ===
 
 @router.post("/register")
-def register(manager: ManagerRegister):
-    if manager.email in fake_db:
-        raise HTTPException(status_code=400, detail="Email already registered")
-    
-    hashed_pw = hash_password(manager.password)
-    fake_db[manager.email] = {
-        "username": manager.username,
-        "email": manager.email,
-        "password": hashed_pw
-    }
-    return {"message": f"Manager {manager.username} registered successfully"}
+def register_manager(data: ManagerRegister, session: Session = Depends(get_session)):
+    existing = session.exec(select(Manager).where(Manager.email == data.email)).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Manager already exists")
+
+    hashed = pwd_context.hash(data.password)
+    new_manager = Manager(email=data.email, password_hash=hashed)
+    session.add(new_manager)
+    session.commit()
+
+    return {"message": "Manager registered"}
+
+
+# === LOGIN ===
 
 @router.post("/login")
-def login(manager: ManagerLogin):
-    user = fake_db.get(manager.email)
-    if not user or not verify_password(manager.password, user["password"]):
+def login_manager(data: ManagerLogin, session: Session = Depends(get_session)):
+    manager = session.exec(select(Manager).where(Manager.email == data.email)).first()
+    if not manager:
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    return {"message": f"Welcome back, {user['username']}!"}
+
+    if not pwd_context.verify(data.password, manager.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    return {"message": "Login successful"}
