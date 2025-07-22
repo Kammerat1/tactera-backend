@@ -31,6 +31,10 @@ class Club(SQLModel, table=True):
     club_name: str
     manager_email: str = Field(foreign_key="manager.email")
 
+    # Link to the training ground this club owns
+    trainingground_id: Optional[int] = Field(default=None, foreign_key="trainingground.id")
+
+
     # One-to-many: Club has many players
     squad: List["Player"] = Relationship(back_populates="club")
 
@@ -82,7 +86,6 @@ from datetime import datetime
 class TrainingGround(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
 
-    club_id: int = Field(foreign_key="club.id")
     level: int  # From 1 (worst) to 10 (best)
     tier: str   # e.g. "Basic", "Elite"
     xp_boost: int  # XP awarded per training session

@@ -5,6 +5,7 @@ from sqlmodel import Session, select
 from models import Club, Player, TrainingGround
 from database import get_session
 from club_models import ClubRegister
+from datetime import datetime
 import random
 
 router = APIRouter()
@@ -18,14 +19,27 @@ def register_club(data: ClubRegister, session: Session = Depends(get_session)):
     if existing_club:
         raise HTTPException(status_code=400, detail="Manager already has a club.")
 
-    # Step 2: Create the club
+    # Step 2: Create the training ground first
+    training_ground = TrainingGround(
+        level=1,
+        tier="Basic",
+        xp_boost=3,
+        built_when=datetime.utcnow()  # optional, if used
+    )
+    session.add(training_ground)
+    session.commit()
+    session.refresh(training_ground)  # so we can get its ID
+
+    # Step 3: Now create the club with a link to the training ground
     new_club = Club(
         club_name=data.club_name,
-        manager_email=data.manager_email
+        manager_email=data.manager_email,
+        trainingground_id=training_ground.id
     )
     session.add(new_club)
     session.commit()
-    session.refresh(new_club)  # This gives us new_club.id
+    session.refresh(new_club)
+
 
     # Step 3: Create 11 players linked to this club
     for i in range(11):
@@ -67,12 +81,11 @@ def train_club(club_id: int, session: Session = Depends(get_session)):
     if not club:
         raise HTTPException(status_code=404, detail="Club not found.")
 
-    # Step 2: Get the club's training ground
-    training_ground = session.exec(
-        select(TrainingGround).where(TrainingGround.club_id == club_id)
-    ).first()
+    # Step 2: Get the club's training ground using its direct reference
+    training_ground = session.get(TrainingGround, club.trainingground_id)
     if not training_ground:
         raise HTTPException(status_code=404, detail="Training ground not found.")
+
 
     # Step 3: Get the squad
     players = session.exec(
