@@ -1,5 +1,6 @@
 from sqlmodel import Session, select
 from models import StatLevelRequirement
+from models import Player
 
 def calculate_level_from_xp(stat_xp: int, session: Session) -> int:
     """
@@ -41,3 +42,39 @@ def add_xp_to_stat(player_id: int, stat_name: str, xp_amount: int, session: Sess
     # Return new level
     return calculate_level_from_xp(new_xp, session)
 
+def add_xp_to_stat(player_id: int, stat_name: str, xp_amount: int, session):
+    """
+    Adds XP to a player's stat (e.g., 'pace', 'passing') by updating the corresponding *_xp field.
+
+    Parameters:
+    - player_id: ID of the player we want to update
+    - stat_name: Name of the stat (like 'pace', 'passing', etc.)
+    - xp_amount: How much XP to add
+    - session: Database session (passed in from the route)
+    """
+
+    # Map stat names to the actual column names in the database
+    stat_field_name = f"{stat_name}_xp"  # e.g., 'pace' → 'pace_xp'
+
+    # Get the player from the database
+    player = session.get(Player, player_id)
+
+    # If the player doesn't exist, return an error
+    if not player:
+        raise ValueError(f"Player with ID {player_id} not found.")
+
+    # Check if the player actually has this stat field (like 'pace_xp')
+    if not hasattr(player, stat_field_name):
+        raise ValueError(f"Stat '{stat_name}' is not valid.")
+
+    # Get the current XP value for the stat
+    current_xp = getattr(player, stat_field_name)
+
+    # Add the new XP amount
+    new_xp = current_xp + xp_amount
+
+    # Update the stat XP on the player
+    setattr(player, stat_field_name, new_xp)
+
+    # Save the change to the database
+    session.commit()

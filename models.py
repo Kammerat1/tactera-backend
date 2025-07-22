@@ -37,19 +37,11 @@ class Club(SQLModel, table=True):
     # Backref to Manager
     manager: Optional[Manager] = Relationship(back_populates="club")
 
-
-# === PLAYER MODEL ===
-
 # === PLAYER MODEL ===
 
 class Player(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
-
-    # Base stat values
-    pace: int
-    passing: int
-    defending: int
 
     # XP for each stat
     pace_xp: int = Field(default=0)
@@ -153,3 +145,5 @@ def reset_statlevel_table(session: Session):
     except SQLAlchemyError as e:
         session.rollback()
         print("❌ Failed to clear table:", e)
+
+
