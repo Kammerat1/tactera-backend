@@ -258,3 +258,36 @@ def get_player_stat_summary(player_id: int, session: Session = Depends(get_sessi
         "player_id": player_id,
         "stats": summary
     }
+
+# 🧠 ROUTE: View a player's current stat levels and XP
+@router.get("/player/{player_id}/stat-levels")
+def get_player_stat_levels(player_id: int, session: Session = Depends(get_session)):
+    """
+    Returns the player's current XP and calculated level for each stat.
+    """
+    # Look up the player by ID
+    player = session.query(Player).filter(Player.id == player_id).first()
+
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    # Calculate levels using XP values
+    pace_level = calculate_level_from_xp(player.pace_xp, session)
+    passing_level = calculate_level_from_xp(player.passing_xp, session)
+    defending_level = calculate_level_from_xp(player.defending_xp, session)
+
+    return {
+        "player_name": player.name,
+        "pace": {
+            "level": pace_level,
+            "xp": player.pace_xp
+        },
+        "passing": {
+            "level": passing_level,
+            "xp": player.passing_xp
+        },
+        "defending": {
+            "level": defending_level,
+            "xp": player.defending_xp
+        }
+    }
