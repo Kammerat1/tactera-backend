@@ -100,33 +100,23 @@ class StatLevelRequirement(SQLModel, table=True):
 from sqlmodel import Session
 from database import engine
 
-def seed_level_requirements():
-    """
-    Fills the StatLevelRequirement table with XP thresholds for each level.
-    Levels 1–10 increase by a flat 50 XP.
-    Levels 11+ increase incrementally by 10 XP per level.
-    """
-    from models import StatLevelRequirement
-    with Session(engine) as session:
-        # Check if already seeded
-        count = session.exec(select(StatLevelRequirement)).all()
-        if count:
-            return
+        # 👇 NEW: Table to store each training session
+class TrainingSession(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)  # unique ID for this session
 
-        levels = []
-        xp = 0
+    player_id: int = Field(foreign_key="player.id")  # which player trained
+    player: Optional["Player"] = Relationship()      # optional relationship if needed later
 
-        for level in range(1, 101):
-            if level <= 10:
-                xp_required = (level - 1) * 50
-            else:
-                increment = 50 + (level - 11) * 10
-                xp_required += increment
+    timestamp: datetime = Field(default_factory=datetime.utcnow)  # when the session happened
 
-            levels.append(StatLevelRequirement(level=level, xp_required=xp_required))
+    # XP gained in this session — not total
+    pace_xp: int = Field(default=0)
+    passing_xp: int = Field(default=0)
+    defending_xp: int = Field(default=0)
 
-        session.add_all(levels)
-        session.commit()
+    drill: str  # short label like "Speed Drill"
+    note: Optional[str] = None  # optional details or notes
+
 
 
 #TEMPORARY FUNCTION FOR READING EXCEL FILES

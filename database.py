@@ -24,3 +24,6 @@ def init_db():
     StatLevelRequirement = import_stat_model()
     SQLModel.metadata.create_all(engine)
 
+def get_sync_session():
+    """Used outside of FastAPI routes, like in seed scripts."""
+    return Session(engine)

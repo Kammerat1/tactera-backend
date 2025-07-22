@@ -1,36 +1,51 @@
-import openpyxl
-from sqlmodel import Session
-from database import engine
+from openpyxl import load_workbook
 from models import StatLevelRequirement
-from sqlalchemy import text
+from database import get_sync_session
 
-# Path to your latest Excel file (update if it's named differently)
-EXCEL_FILE_PATH = "Training_xp_levels_uploaded.xlsx"
 
-def seed_statlevel_table_from_excel():
-    # Load the Excel workbook
-    workbook = openpyxl.load_workbook(EXCEL_FILE_PATH)
-    sheet = workbook.active
 
-    # Start a session to write to the database
-    with Session(engine) as session:
-        # Optional: Clear existing data first
-        session.exec(text("DELETE FROM statlevelrequirement"))
-        session.commit()
+from openpyxl import load_workbook
+from models import StatLevelRequirement
+from database import get_session  # Uses the same session method your API routes use
 
-        # Loop through rows starting from the second row (skip header)
-        for row in sheet.iter_rows(min_row=2, max_col=2, values_only=True):
-            level, xp_required = row
+def safe_seed_stat_levels():
+    """
+    Seeds the StatLevelRequirement table from an Excel file (xp_levels.xlsx).
+    Only runs if the table is currently empty.
+    """
+    # Get a database session
+    session = next(get_session())
 
-            # Skip rows that are missing either value
-            if level is None or xp_required is None:
+    # Check if data already exists in the table
+    existing_count = session.query(StatLevelRequirement).count()
+    if existing_count > 0:
+        print(f"⚠️ StatLevelRequirement already has {existing_count} rows. Skipping seeding.")
+        return
+
+    try:
+        # Load the Excel workbook and get the active sheet
+        wb = load_workbook("xp_levels.xlsx")
+        sheet = wb.active
+
+        inserted = 0  # Keep track of how many levels we insert
+
+        # Loop through each row, starting from row 2 to skip headers
+        for row in sheet.iter_rows(min_row=2, values_only=True):
+            level, xp = row
+
+            # Skip rows with missing values
+            if level is None or xp is None:
                 continue
 
-            # Insert new StatLevelRequirement row
-            session.add(StatLevelRequirement(level=int(level), xp_required=int(xp_required)))
+            # Add a new row to the database
+            session.add(StatLevelRequirement(level=int(level), xp_required=int(xp)))
+            inserted += 1
 
+        # Save all changes to the database
         session.commit()
-        print("✅ XP levels seeded from Excel.")
+        print(f"✅ Seeded {inserted} levels into StatLevelRequirement.")
 
-if __name__ == "__main__":
-    seed_statlevel_table_from_excel()
+    except FileNotFoundError:
+        print("❌ xp_levels.xlsx not found. Make sure it's in the same folder as main.py.")
+    except Exception as e:
+        print(f"❌ Seeding failed: {e}")

@@ -8,6 +8,8 @@ from auth import router as auth_router
 from club import router as club_router
 from match import router as match_router
 from player_routes import router as player_router
+from seed_xp_levels import safe_seed_stat_levels
+
 
 
 from database import init_db, engine  # ✅ Add engine import here
@@ -16,17 +18,10 @@ from database import init_db, engine  # ✅ Add engine import here
 app = FastAPI()
 init_db()
 
-#TEMPORARY FUNCTION TO READ EXCEL FILES
-from models import reset_statlevel_table
-reset_statlevel_table(Session(engine))
-#END OF TEMPORARY FUNCTION
+# ✅ Automatically seed the XP levels if table is empty
+safe_seed_stat_levels()
 
 app.include_router(auth_router, prefix="/auth")
 app.include_router(club_router, prefix="/club")
 app.include_router(match_router, prefix="/match")
 app.include_router(player_router)
-
-
-from models import seed_level_requirements
-
-seed_level_requirements()  # Run this once to populate the level XP table

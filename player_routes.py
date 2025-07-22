@@ -2,9 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 from database import get_session
 from models import Player
-from xp_helper import calculate_level_from_xp
 from models import StatLevelRequirement
 from typing import Optional
+from models import TrainingSession
+
 
 
 
@@ -66,34 +67,8 @@ def debug_get_levels(session: Session = Depends(get_session)):
 # ⚠️ TEMPORARY DEBUG ROUTE — used to simulate training by adding XP to a player's stat
 
 from fastapi import Query  # Add this at the top if not already imported
+from xp_helper import calculate_level_from_xp
 from xp_helper import add_xp_to_stat  # Import the helper we just made
-
-@router.get("/debug/train")
-def debug_add_xp_to_stat(
-    player_id: int = Query(..., description="ID of the player"),
-    stat_name: str = Query(..., description="Name of the stat, like 'pace' or 'passing'"),
-    xp_amount: int = Query(..., description="Amount of XP to add"),
-    session: Session = Depends(get_session)
-):
-    """
-    Temporary route to simulate training by adding XP to a player's stat.
-
-    Example: /debug/train?player_id=1&stat_name=pace&xp_amount=40
-    """
-
-    try:
-        # Try to add the XP using our helper function
-        add_xp_to_stat(player_id, stat_name, xp_amount, session)
-
-        return {"message": f"Added {xp_amount} XP to {stat_name} for player {player_id}."}
-
-    except ValueError as e:
-        # If something went wrong (like invalid stat or player), return the error message
-        return {"error": str(e)}
-    
-    # ⚠️ TEMPORARY DEBUG ROUTE — shows XP and level for one stat on a player
-
-from xp_helper import calculate_level_from_xp  # Already in use earlier
 
 @router.get("/debug/stat-info")
 def debug_get_stat_info(
@@ -170,3 +145,116 @@ def debug_train_session(
 
     except ValueError as e:
         return {"error": str(e)}
+
+# 🧪 TEMP ROUTE: Log a training session and apply XP
+@router.post("/debug/train-session")
+def log_training_session(
+    player_id: int = Query(..., description="ID of the player who trained"),
+    pace: int = Query(0, description="XP to add to pace"),
+    passing: int = Query(0, description="XP to add to passing"),
+    defending: int = Query(0, description="XP to add to defending"),
+    drill: str = Query(..., description="Name of the drill, e.g., 'Agility Circuit'"),
+    note: Optional[str] = Query(None, description="Optional note about the session"),
+    session: Session = Depends(get_session),
+):
+    """
+    ⛓️ This route:
+    - Adds XP to the player's stats using your existing XP logic
+    - Saves a new TrainingSession to the database
+    """
+
+    # 🧠 STEP 1: Get the player's current XP and levels BEFORE training
+    player = session.get(Player, player_id)
+    if not player:
+        return {"error": f"Player with ID {player_id} not found."}
+
+    # Store levels before XP is added
+    levels_before = {
+        "pace": calculate_level_from_xp(player.pace_xp, session),
+        "passing": calculate_level_from_xp(player.passing_xp, session),
+        "defending": calculate_level_from_xp(player.defending_xp, session),
+    }
+
+
+    # ✅ Add XP to each stat if value is given
+    from xp_helper import add_xp_to_stat
+
+    if pace:
+        add_xp_to_stat(player_id, "pace", pace, session)
+    if passing:
+        add_xp_to_stat(player_id, "passing", passing, session)
+    if defending:
+        add_xp_to_stat(player_id, "defending", defending, session)
+
+            # 🧠 STEP 2: Calculate levels AFTER XP is added
+    updated_player = session.get(Player, player_id)
+
+    levels_after = {
+        "pace": calculate_level_from_xp(updated_player.pace_xp, session),
+        "passing": calculate_level_from_xp(updated_player.passing_xp, session),
+        "defending": calculate_level_from_xp(updated_player.defending_xp, session),
+    }
+
+    # Compare before/after to detect level-ups
+    level_changes = {}
+    for stat in ["pace", "passing", "defending"]:
+        before = levels_before[stat]
+        after = levels_after[stat]
+        if before < after:
+            level_changes[stat] = f"Level {before} → Level {after} (Leveled up!)"
+        else:
+            level_changes[stat] = f"Level {before} → Level {after} (No change)"
+
+
+    # ✅ Save the training session to the database
+    new_session = TrainingSession(
+        player_id=player_id,
+        pace_xp=pace,
+        passing_xp=passing,
+        defending_xp=defending,
+        drill=drill,
+        note=note
+    )
+    session.add(new_session)
+    session.commit()
+
+    return {
+        "status": "success",
+        "message": "Training session logged and XP applied.",
+        "level_changes": level_changes
+    }
+
+
+@router.get("/players/{player_id}/stat-summary")
+def get_player_stat_summary(player_id: int, session: Session = Depends(get_session)):
+    """
+    📊 Returns the player's current XP and level for all three stats.
+    Example: /players/1/stat-summary
+    """
+
+    # 🧠 STEP 1: Get the player from the database
+    player = session.get(Player, player_id)
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    # 🧠 STEP 2: Calculate level for each stat using their XP
+    summary = {
+        "pace": {
+            "xp": player.pace_xp,
+            "level": calculate_level_from_xp(player.pace_xp, session)
+        },
+        "passing": {
+            "xp": player.passing_xp,
+            "level": calculate_level_from_xp(player.passing_xp, session)
+        },
+        "defending": {
+            "xp": player.defending_xp,
+            "level": calculate_level_from_xp(player.defending_xp, session)
+        },
+    }
+
+    # ✅ Return structured stat summary
+    return {
+        "player_id": player_id,
+        "stats": summary
+    }
