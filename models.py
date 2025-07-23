@@ -203,4 +203,18 @@ def reset_statlevel_table(session: Session):
         session.rollback()
         print("❌ Failed to clear table:", e)
 
+# Stadium represents a football stadium linked to a club
+class Stadium(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    sponsor_name: Optional[str] = None
+    club_id: int = Field(foreign_key="club.id")
+
+# StadiumPart represents individual parts of a stadium that can be upgraded and degrade over time
+class StadiumPart(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    stadium_id: int = Field(foreign_key="stadium.id")
+    type: str  # e.g., 'stand_home', 'stand_away', 'stand_north', 'stand_south', 'pitch'
+    level: int
+    durability: int
 
