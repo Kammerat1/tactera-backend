@@ -106,3 +106,28 @@ def get_standings(league_id: int, session: Session = Depends(get_session)):
         "season": 1,
         "standings": sorted_table
     }
+
+from datetime import datetime
+from models import SeasonState
+
+@router.post("/league/{league_id}/advance-round")
+def advance_round(league_id: int, session: Session = Depends(get_session)):
+    # 🔍 Find the current SeasonState
+    state = session.exec(
+        select(SeasonState).where(SeasonState.league_id == league_id)
+    ).first()
+
+    if not state:
+        return {"error": "No SeasonState found for this league."}
+
+    # ⏭️ Advance the round
+    state.current_round += 1
+    state.last_round_advanced = datetime.utcnow()
+
+    session.add(state)
+    session.commit()
+
+    return {
+        "message": f"✅ Round advanced to {state.current_round} for league {league_id}",
+        "new_round": state.current_round
+    }
