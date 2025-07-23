@@ -2,6 +2,8 @@ from fastapi import FastAPI
 from sqlmodel import SQLModel
 from models import Manager, Club, Player, MatchResult, TrainingGround
 from sqlmodel import Session
+from models import *  # This ensures Stadium + StadiumPart are included
+
 
 
 from auth import router as auth_router
@@ -19,6 +21,10 @@ from database import init_db, engine  # ✅ Add engine import here
 
 app = FastAPI()
 init_db()
+
+# ✅ Create all tables including Stadium and StadiumPart
+SQLModel.metadata.create_all(engine)
+
 
 # ✅ Automatically seed the XP levels if table is empty
 safe_seed_stat_levels()

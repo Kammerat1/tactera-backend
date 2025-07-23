@@ -24,13 +24,13 @@ with Session(engine) as session:
         print("❌ Superliga not found. Run seed_leagues.py first.")
     else:
         for name in club_names:
-            existing = session.exec(select(Club).where(Club.club_name == name)).first()
+            existing = session.exec(select(Club).where(Club.name == name)).first()
             if existing:
                 print(f"⚠️ {name} already exists. Skipping.")
                 continue
 
             club = Club(
-                club_name=name,
+                name=name,
                 manager_email="bot@tactera.ai",  # placeholder manager
                 league_id=league.id
             )

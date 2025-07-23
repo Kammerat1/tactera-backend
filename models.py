@@ -28,7 +28,7 @@ class Manager(SQLModel, table=True):
 
 class Club(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    club_name: str
+    name: str
     manager_email: str = Field(foreign_key="manager.email")
 
     # ✅ New: Optional link to a league
