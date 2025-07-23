@@ -52,9 +52,6 @@ class Player(SQLModel, table=True):
     name: str
 
     # XP for each stat
-    pace_xp: int = Field(default=0)
-    passing_xp: int = Field(default=0)
-    defending_xp: int = Field(default=0)
 
     club_id: int = Field(foreign_key="club.id")
     club: Optional["Club"] = Relationship(back_populates="squad")
