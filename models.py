@@ -1,5 +1,5 @@
 from sqlmodel import SQLModel, Field, Relationship, select
-from typing import Optional, List
+from typing import Optional, List, Literal
 from pydantic import BaseModel
 from datetime import datetime
 
@@ -50,8 +50,12 @@ class Club(SQLModel, table=True):
 class Player(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
-
-    # XP for each stat
+    age: int
+    position: str  # Could be Literal[...] later
+    height_cm: int
+    weight_kg: int
+    preferred_foot: str  # "left", "right", or "both"
+    is_goalkeeper: bool
 
     club_id: int = Field(foreign_key="club.id")
     club: Optional["Club"] = Relationship(back_populates="squad")

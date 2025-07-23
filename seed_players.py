@@ -3,20 +3,41 @@ from models import Club, Player
 from database import engine
 import random
 
-# 👥 How many players to create per club
 PLAYERS_PER_CLUB = 18
 
-# 🧠 Generate a simple placeholder name
-def generate_player_name(index):
-    return f"Player {index}"
+# ⚽ Allowed positions (excluding CF)
+POSITIONS = [
+    "GK", "LB", "CB", "RB",
+    "CDM", "CM", "CAM",
+    "LM", "RM",
+    "LW", "RW", "ST"
+]
 
-# 🚀 Main logic: Seed players for each club
+PREFERRED_FEET = ["left", "right", "right", "right", "both"]  # Weighted
+
+def generate_random_player(index: int, club_id: int) -> Player:
+    position = random.choice(POSITIONS)
+    is_goalkeeper = position == "GK"
+
+    height_cm = random.randint(185, 205) if is_goalkeeper else random.randint(165, 205)
+    weight_kg = height_cm - 100 + random.randint(-5, 10)
+
+    return Player(
+        name=f"Player {index}",
+        age=random.randint(16, 34),
+        position=position,
+        height_cm=height_cm,
+        weight_kg=weight_kg,
+        preferred_foot=random.choice(PREFERRED_FEET),
+        is_goalkeeper=is_goalkeeper,
+        club_id=club_id
+    )
+
 def seed_players():
     with Session(engine) as session:
         clubs = session.exec(select(Club)).all()
 
         for club in clubs:
-            # Check how many players already exist in the club
             existing_players = session.exec(
                 select(Player).where(Player.club_id == club.id)
             ).all()
@@ -25,12 +46,8 @@ def seed_players():
                 print(f"⚠️ Club '{club.name}' already has players. Skipping.")
                 continue
 
-            # Add new players
             for i in range(PLAYERS_PER_CLUB):
-                player = Player(
-                    name=generate_player_name(i + 1),
-                    club_id=club.id
-                )
+                player = generate_random_player(i + 1, club.id)
                 session.add(player)
 
             print(f"✅ Added {PLAYERS_PER_CLUB} players to '{club.name}'")
