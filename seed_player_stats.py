@@ -5,7 +5,20 @@ from database import engine
 import random
 
 # 🧠 List of stats each player should have
-STAT_NAMES = ["pace", "passing", "defending"]
+# 🧠 Full 10-stat list for field players
+STAT_NAMES = [
+    "passing",
+    "finishing",
+    "dribbling",
+    "tackling",
+    "first_touch",
+    "vision",
+    "positioning",
+    "pace",
+    "stamina",
+    "strength"
+]
+
 
 def seed_player_stats():
     with Session(engine) as session:
