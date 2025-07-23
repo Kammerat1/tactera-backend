@@ -57,6 +57,12 @@ class Player(SQLModel, table=True):
     preferred_foot: str  # "left", "right", or "both"
     is_goalkeeper: bool
 
+    # HIDDEN STATS
+    ambition: int
+    consistency: int
+    injury_proneness: int
+    potential: int  # fixed between 1–200
+
     club_id: int = Field(foreign_key="club.id")
     club: Optional["Club"] = Relationship(back_populates="squad")
 

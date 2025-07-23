@@ -30,6 +30,13 @@ def generate_random_player(index: int, club_id: int) -> Player:
         weight_kg=weight_kg,
         preferred_foot=random.choice(PREFERRED_FEET),
         is_goalkeeper=is_goalkeeper,
+
+        #HIDDEN STATS
+        ambition=random.randint(30, 100),
+        consistency=random.randint(20, 100),
+        injury_proneness=random.randint(10, 70),
+        potential=random.randint(50, 200),
+        
         club_id=club_id
     )
 
