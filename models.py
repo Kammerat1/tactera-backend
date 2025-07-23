@@ -31,6 +31,10 @@ class Club(SQLModel, table=True):
     club_name: str
     manager_email: str = Field(foreign_key="manager.email")
 
+    # ✅ New: Optional link to a league
+    league_id: Optional[int] = Field(default=None, foreign_key="league.id")
+    league: Optional["League"] = Relationship(back_populates="clubs")
+
     # Link to the training ground this club owns
     trainingground_id: Optional[int] = Field(default=None, foreign_key="trainingground.id")
 
@@ -119,6 +123,50 @@ class TrainingSession(SQLModel, table=True):
 
     drill: str  # short label like "Speed Drill"
     note: Optional[str] = None  # optional details or notes
+
+from sqlmodel import SQLModel, Field, Relationship
+from typing import Optional, List
+
+# 🌍 Country model: represents a nation that hosts leagues
+class Country(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str  # e.g. "Denmark"
+
+    # List of leagues in this country
+    leagues: List["League"] = Relationship(back_populates="country")
+
+
+# 🏆 League model: tied to a country and will contain clubs
+class League(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str  # e.g. "Division 1"
+    level: int  # e.g. 1 for top league, 2 for second tier
+
+    country_id: int = Field(foreign_key="country.id")
+    country: Optional[Country] = Relationship(back_populates="leagues")
+        # ✅ New: One league has many clubs
+    clubs: List["Club"] = Relationship(back_populates="league")
+
+
+from datetime import datetime
+
+# ⚽ Match model: represents a scheduled fixture between two clubs in a league
+class Match(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    league_id: int = Field(foreign_key="league.id")  # league the match belongs to
+    home_club_id: int = Field(foreign_key="club.id")  # home team
+    away_club_id: int = Field(foreign_key="club.id")  # away team
+
+    round_number: int  # 1–30
+    season: int  # in-game season number
+    match_time: Optional[datetime] = None  # for future match scheduling
+
+    home_goals: Optional[int] = None  # to be filled when match is simulated
+    away_goals: Optional[int] = None
+    is_played: bool = False  # set to True once match is simulated
+
+
 
 
 

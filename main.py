@@ -9,6 +9,8 @@ from club import router as club_router
 from match import router as match_router
 from player_routes import router as player_router
 from seed_xp_levels import safe_seed_stat_levels
+from league_routes import router as league_router
+
 
 
 
@@ -25,3 +27,4 @@ app.include_router(auth_router, prefix="/auth")
 app.include_router(club_router, prefix="/club")
 app.include_router(match_router, prefix="/match")
 app.include_router(player_router)
+app.include_router(league_router)
