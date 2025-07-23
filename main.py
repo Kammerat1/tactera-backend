@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from sqlmodel import SQLModel
+from player_stat import PlayerStat
 from models import Manager, Club, Player, MatchResult, TrainingGround
 from sqlmodel import Session
 from models import *  # This ensures Stadium + StadiumPart are included
