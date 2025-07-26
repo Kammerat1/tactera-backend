@@ -110,3 +110,17 @@ def calculate_training_xp(
     xp = potential_factor * ambition_factor * tg_factor * variance
     return round(xp, 2)
 
+def split_xp_among_stats(total_xp: float, stat_list: List[str]) -> Dict[str, float]:
+    """
+    Splits total XP among stats with +/- 20% random variation.
+    Returns a dict: {stat_name: xp}
+    """
+    base_xp = total_xp / len(stat_list)
+    stat_xp = {}
+
+    for stat in stat_list:
+        variation = random.uniform(0.8, 1.2)  # +/-20%
+        xp = round(base_xp * variation, 2)
+        stat_xp[stat] = xp
+
+    return stat_xp
