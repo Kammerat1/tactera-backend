@@ -4,7 +4,6 @@ import random
 from typing import List, Dict
 from models import Club, Player, TrainingGround  # Core models
 from player_stat import PlayerStat  # Stat model lives in separate file
-from training import calculate_training_xp, split_xp_among_stats, get_drill_by_name
 
 
 # === DRILL DEFINITIONS ===
@@ -185,9 +184,9 @@ def train_club(club_id: int, session: Session = Depends(get_session)):
         updated_stats = []
 
         for stat in stats:
-            if stat.name in xp_split:
-                stat.xp += xp_split[stat.name]
-                updated_stats.append({"stat": stat.name, "xp_gained": xp_split[stat.name]})
+            if stat.stat_name in xp_split:
+                stat.xp += xp_split[stat.stat_name]
+                updated_stats.append({"stat": stat.stat_name, "xp_gained": xp_split[stat.stat_name]})
 
         training_data.append({
             "player": player.name,
