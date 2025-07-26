@@ -2,6 +2,9 @@
 
 import random
 from typing import List, Dict
+from models import Club, Player, PlayerStat, TrainingGround
+from training import calculate_training_xp, split_xp_among_stats, get_drill_by_name
+
 
 # === DRILL DEFINITIONS ===
 # Each drill contains a name and a list of affected stats
@@ -162,14 +165,39 @@ def train_club(club_id: int, session: Session = Depends(get_session)):
     for player in players:
         stats = session.exec(select(PlayerStat).where(PlayerStat.player_id == player.id)).all()
 
-        # Just gather player names + number of stats for now
+        drill = get_drill_by_name("1v1 Challenge")
+
+        tg = session.exec(
+            select(TrainingGround).where(TrainingGround.id == club.trainingground_id)
+        ).first()
+        tg_boost = tg.xp_boost if tg else 100
+
+        total_xp = calculate_training_xp(
+            potential=player.potential,
+            ambition=player.ambition,
+            consistency=player.consistency,
+            training_ground_boost=tg_boost
+        )
+
+        xp_split = split_xp_among_stats(total_xp, drill["affected_stats"])
+
+        updated_stats = []
+
+        for stat in stats:
+            if stat.name in xp_split:
+                stat.xp += xp_split[stat.name]
+                updated_stats.append({"stat": stat.name, "xp_gained": xp_split[stat.name]})
+
         training_data.append({
             "player": player.name,
-            "num_stats": len(stats)
+            "total_xp": total_xp,
+            "updated_stats": updated_stats
         })
 
+
     return {
-        "message": "Loaded players and stats successfully",
+        "message": "Training complete (dry run)",
         "players": training_data
     }
+
 
