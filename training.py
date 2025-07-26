@@ -194,6 +194,13 @@ def train_club(club_id: int, session: Session = Depends(get_session)):
             "updated_stats": updated_stats
         })
 
+    # Set the cooldown
+    club.last_training_date = today
+
+    # Save all updates
+    session.add(club)
+    session.commit()
+
 
     return {
         "message": "Training complete (dry run)",
