@@ -37,7 +37,7 @@ class Club(SQLModel, table=True):
 
     # Link to the training ground this club owns
     trainingground_id: Optional[int] = Field(default=None, foreign_key="trainingground.id")
-
+    last_training_date: Optional[date] = None
 
     # One-to-many: Club has many players
     squad: List["Player"] = Relationship(back_populates="club")
