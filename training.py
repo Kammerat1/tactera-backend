@@ -150,5 +150,26 @@ def train_club(club_id: int, session: Session = Depends(get_session)):
     if club.last_training_date == today:
         raise HTTPException(status_code=403, detail="Club has already trained today")
 
-    # TEMP: Placeholder response
-    return {"message": "Training allowed. Ready to process players."}
+    # Load all players in the club
+    players = session.exec(select(Player).where(Player.club_id == club.id)).all()
+
+    if not players:
+        raise HTTPException(status_code=404, detail="No players found in this club")
+
+    # Load stats for each player
+    training_data = []
+
+    for player in players:
+        stats = session.exec(select(PlayerStat).where(PlayerStat.player_id == player.id)).all()
+
+        # Just gather player names + number of stats for now
+        training_data.append({
+            "player": player.name,
+            "num_stats": len(stats)
+        })
+
+    return {
+        "message": "Loaded players and stats successfully",
+        "players": training_data
+    }
+
