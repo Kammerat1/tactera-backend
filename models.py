@@ -1,7 +1,7 @@
 from sqlmodel import SQLModel, Field, Relationship, select
 from typing import Optional, List, Literal
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, date
 
 
 # === REQUEST MODELS ===

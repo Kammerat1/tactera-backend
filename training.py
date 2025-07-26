@@ -2,7 +2,8 @@
 
 import random
 from typing import List, Dict
-from models import Club, Player, PlayerStat, TrainingGround
+from models import Club, Player, TrainingGround  # Core models
+from player_stat import PlayerStat  # Stat model lives in separate file
 from training import calculate_training_xp, split_xp_among_stats, get_drill_by_name
 
 

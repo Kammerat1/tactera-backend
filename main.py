@@ -35,3 +35,10 @@ app.include_router(club_router, prefix="/club")
 app.include_router(match_router, prefix="/match")
 app.include_router(player_router)
 app.include_router(league_router)
+
+# 🧩 Import the training route
+from training import router as training_router
+
+# 🔌 Connect the training route to the FastAPI app
+# This will activate /clubs/{club_id}/train in Swagger and in the API
+app.include_router(training_router)
