@@ -124,3 +124,31 @@ def split_xp_among_stats(total_xp: float, stat_list: List[str]) -> Dict[str, flo
         stat_xp[stat] = xp
 
     return stat_xp
+
+
+# training.py (continued)
+
+from fastapi import APIRouter, HTTPException, Depends
+from sqlmodel import Session, select
+from datetime import date
+from database import get_session
+from models import Club
+
+router = APIRouter()
+
+@router.post("/clubs/{club_id}/train")
+def train_club(club_id: int, session: Session = Depends(get_session)):
+    # Get today's date
+    today = date.today()
+
+    # Load the club
+    club = session.exec(select(Club).where(Club.id == club_id)).first()
+    if not club:
+        raise HTTPException(status_code=404, detail="Club not found")
+
+    # Check if already trained today
+    if club.last_training_date == today:
+        raise HTTPException(status_code=403, detail="Club has already trained today")
+
+    # TEMP: Placeholder response
+    return {"message": "Training allowed. Ready to process players."}
