@@ -60,7 +60,7 @@ def register_club(data: ClubRegister, session: Session = Depends(get_session)):
         club_id=new_club.id,
         level=1,
         tier="Basic",
-        xp_boost=3
+        xp_boost=115
     )
     session.add(training_ground)
 

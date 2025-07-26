@@ -100,6 +100,19 @@ def calculate_training_xp(
     consistency: int,
     training_ground_boost: int
 ) -> float:
+    
+    if ambition >= 950:
+        ambition_factor = 1.2
+    if ambition >= 90:
+        ambition_factor = 1.1
+    if ambition >= 80:
+        ambition_factor = 1.0
+    elif ambition >= 60:
+        ambition_factor = 0.9
+    elif ambition >= 40:
+        ambition_factor = 0.70
+    else:
+        ambition_factor = 0.6
     """
     Calculate the total XP a player earns in a training session.
 
@@ -107,7 +120,7 @@ def calculate_training_xp(
     """
     ambition_factor = ambition / 100
     potential_factor = potential
-    tg_factor = training_ground_boost / 100
+    tg_factor = 1 + (training_ground_boost / 100)
     variance = get_consistency_variance(consistency)
 
     xp = potential_factor * ambition_factor * tg_factor * variance
