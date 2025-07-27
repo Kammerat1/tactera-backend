@@ -37,6 +37,11 @@ DRILLS = [
         "name": "1v1 Challenge",
         "affected_stats": ["pace", "tackling", "dribbling", "finishing"]
     },
+     {
+        "name": "Friendly Match",
+        "affected_stats": ["passing", "finishing", "dribbling", "tackling", "first_touch",
+            "vision", "positioning", "pace", "stamina", "strength"]
+    },
 ]
 
 def get_drill_by_name(name: str) -> Dict:

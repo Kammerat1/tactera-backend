@@ -8,7 +8,7 @@ from database import get_session
 from club_models import ClubRegister
 from datetime import datetime
 import random
-from training import calculate_training_xp
+from training import calculate_training_xp, split_xp_among_stats
 
 
 router = APIRouter()
@@ -78,6 +78,11 @@ def register_club(data: ClubRegister, session: Session = Depends(get_session)):
 
 # === TRAINING ENDPOINT ===
 
+# Pick the drill (temporary: fixed as "Squad Cohesion")
+drill_name = "Squad Cohesion"
+affected_stats = ["passing", "vision", "stamina", "strength", "positioning"]
+
+
 @router.post("/{club_id}")
 def train_club(club_id: int, session: Session = Depends(get_session)):
 
@@ -114,19 +119,22 @@ def train_club(club_id: int, session: Session = Depends(get_session)):
             select(PlayerStat).where(PlayerStat.player_id == player.id)
         ).all()
 
-        # All 10 stats we support
-        stat_names = [
-            "passing", "finishing", "dribbling", "tackling", "first_touch",
-            "vision", "positioning", "pace", "stamina", "strength"
-        ]
+                # === Step 1: Calculate total XP for this player ===
+        total_xp = calculate_training_xp(
+            potential=player.potential,
+            ambition=player.ambition,
+            consistency=player.consistency,
+            training_ground_boost=training_ground.xp_boost
+        )
 
-        # Loop through each stat the player should have
-        for stat_name in stat_names:
-            # Try to find existing stat row
+        # === Step 2: Split XP among affected stats ===
+        stat_xp_map = split_xp_among_stats(total_xp, affected_stats)
+
+        # === Step 3: Apply split XP to each affected stat ===
+        for stat_name, xp_gain in stat_xp_map.items():
             stat = next((s for s in player_stats if s.stat_name == stat_name), None)
 
             if not stat:
-                # If not found, create it with default value and 0 XP
                 stat = PlayerStat(
                     player_id=player.id,
                     stat_name=stat_name,
@@ -138,22 +146,10 @@ def train_club(club_id: int, session: Session = Depends(get_session)):
                 session.refresh(stat)
                 player_stats.append(stat)
 
-            # Calculate training XP using player traits and training ground
-            xp_gain = calculate_training_xp(
-                potential=player.potential,
-                ambition=player.ambition,
-                consistency=player.consistency,
-                training_ground_boost=training_ground.xp_boost
-            )
-
-            # Add XP to this stat
             stat.xp += int(xp_gain)
-
-            # Update stat value using helper function
             stat.value = get_stat_level(stat.xp, session)
-
-            # Save updated stat
             session.add(stat)
+
 
         # 📦 After all stats have been updated, prepare return data
         stat_summary = {
