@@ -131,6 +131,7 @@ def train_club(club_id: int, session: Session = Depends(get_session)):
         stat_xp_map = split_xp_among_stats(total_xp, affected_stats)
 
         # === Step 3: Apply split XP to each affected stat ===
+        delta_map = {}
         for stat_name, xp_gain in stat_xp_map.items():
             stat = next((s for s in player_stats if s.stat_name == stat_name), None)
 
@@ -147,24 +148,29 @@ def train_club(club_id: int, session: Session = Depends(get_session)):
                 player_stats.append(stat)
 
             stat.xp += int(xp_gain)
+            delta_map[stat_name] = int(xp_gain)
             stat.value = get_stat_level(stat.xp, session)
             session.add(stat)
 
 
         # 📦 After all stats have been updated, prepare return data
-        stat_summary = {
-            stat.stat_name: {
-                "value": stat.value,
-                "xp": stat.xp
-            }
-            for stat in player_stats
-        }
+        stat_summary = {}
+    for stat in player_stats:
+        stat_summary[stat.stat_name] = {
+        "value": stat.value,
+        "xp": stat.xp,
+        "delta_xp": delta_map.get(stat.stat_name, 0)
+    }
+
+
 
         updated_players.append({
             "player_id": player.id,
             "name": player.name,
+            "total_xp_earned": int(total_xp),
             "stats": stat_summary
         })
+
 
 
 
@@ -174,8 +180,9 @@ def train_club(club_id: int, session: Session = Depends(get_session)):
     # Step 5: Save changes and return
     session.commit()
 
+    # NEEDS UPDATE
     return {
-        "xp_gain": xp_gain,
+        "total_xp_earned": xp_gain,
         "players_trained": updated_players
     }
     
