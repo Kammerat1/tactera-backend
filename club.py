@@ -90,8 +90,9 @@ def train_club(club_id: int, session: Session = Depends(get_session)):
         print(f" - Player: {player.name} (id: {player.id}, potential: {player.potential})")
 
         stat = session.query(PlayerStat).filter_by(player_id=player.id).first()
-        if stat:
-            print(f"   - Found PlayerStat. Current pace_xp: {stat.pace_xp}")
+        if stat.stat_name == "pace":
+            print(f"   - Found 'pace' stat. Current XP: {stat.xp}")
+
         else:
             print("   - No PlayerStat found for this player")
 
@@ -139,7 +140,9 @@ def train_club(club_id: int, session: Session = Depends(get_session)):
             training_ground_boost=training_ground.xp_boost
         )
 
-        stat.pace_xp += int(xp)
+        if stat.stat_name == "pace":
+            stat.xp += int(xp)
+            print(f"   - Added {int(xp)} XP to 'pace'. New XP: {stat.xp}")
 
 
         # === Passing ===
@@ -149,7 +152,9 @@ def train_club(club_id: int, session: Session = Depends(get_session)):
             consistency=player.consistency,
             training_ground_boost=training_ground.xp_boost
         )
-        stat.passing_xp += int(xp)
+        if stat.stat_name == "passing":
+            stat.xp += int(xp)
+            print(f"   - Added {int(xp)} XP to 'passing'. New XP: {stat.xp}")
 
 
         # === Defending ===
@@ -159,7 +164,9 @@ def train_club(club_id: int, session: Session = Depends(get_session)):
             consistency=player.consistency,
             training_ground_boost=training_ground.xp_boost
         )
-        stat.defending_xp += int(xp)
+        if stat.stat_name == "defending":
+            stat.xp += int(xp)
+            print(f"   - Added {int(xp)} XP to 'defending'. New XP: {stat.xp}")
 
         session.add(player)
 
