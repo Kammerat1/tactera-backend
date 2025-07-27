@@ -96,11 +96,8 @@ from datetime import datetime
 
 class TrainingGround(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-
-    level: int  # From 1 (worst) to 10 (best)
     tier: str   # e.g. "Basic", "Elite"
     xp_boost: int  # XP awarded per training session
-    built_when: datetime = Field(default_factory=datetime.utcnow)
 
     # Optional: Link back to club later if needed
     # club: Optional[Club] = Relationship(back_populates="training_ground")

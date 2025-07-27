@@ -3,10 +3,13 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 from models import Club, Player, TrainingGround
+from player_stat import PlayerStat
 from database import get_session
 from club_models import ClubRegister
 from datetime import datetime
 import random
+from training import calculate_training_xp
+
 
 router = APIRouter()
 
@@ -19,20 +22,15 @@ def register_club(data: ClubRegister, session: Session = Depends(get_session)):
     if existing_club:
         raise HTTPException(status_code=400, detail="Manager already has a club.")
 
-    # Step 2: Create the training ground first
-    training_ground = TrainingGround(
-        level=1,
-        tier="Basic",
-        xp_boost=3,
-        built_when=datetime.utcnow()  # optional, if used
-    )
-    session.add(training_ground)
-    session.commit()
-    session.refresh(training_ground)  # so we can get its ID
+    # Step 2: Assign the first training ground from the seeded list
+    training_ground = session.get(TrainingGround, 1)
+    if not training_ground:
+        raise HTTPException(status_code=500, detail="Default training ground not found")
+
 
     # Step 3: Now create the club with a link to the training ground
     new_club = Club(
-        club_name=data.club_name,
+        name=data.club_name,
         manager_email=data.manager_email,
         trainingground_id=training_ground.id
     )
@@ -45,24 +43,30 @@ def register_club(data: ClubRegister, session: Session = Depends(get_session)):
     for i in range(11):
         player = Player(
             name=f"Player {i+1}",
+            age=random.randint(18, 34),
+            position="CM",  # or random.choice([...])
+            height_cm=random.randint(165, 200),
+            weight_kg=random.randint(60, 95),
+            preferred_foot=random.choice(["left", "right"]),
+            is_goalkeeper=(i == 0),  # First player as goalkeeper
+
+            ambition=random.randint(30, 100),
+            consistency=random.randint(30, 100),
+            injury_proneness=random.randint(10, 60),
+            potential=random.randint(60, 95),
+
             pace=random.randint(50, 99),
             passing=random.randint(50, 99),
             defending=random.randint(50, 99),
-            pace_xp=random.randint(0, 99),        # Optional: random starting XP
+
+            pace_xp=random.randint(0, 99),
             passing_xp=random.randint(0, 99),
             defending_xp=random.randint(0, 99),
+
             club_id=new_club.id
         )
-        session.add(player)
 
-    # Step 4: Create the training ground
-    training_ground = TrainingGround(
-        club_id=new_club.id,
-        level=1,
-        tier="Basic",
-        xp_boost=115
-    )
-    session.add(training_ground)
+        session.add(player)
 
     # Step 5: Final commit (saves players + training ground)
     session.commit()
@@ -104,32 +108,41 @@ def train_club(club_id: int, session: Session = Depends(get_session)):
         return 100 + (stat_value - 10) * 10
 
     for player in players:
+
+        stat = session.query(PlayerStat).filter_by(player_id=player.id).first()
+        if not stat:
+            continue  # or optionally create a new PlayerStat row
+
         # === Pace ===
-        player.pace_xp += xp_gain
-        while True:
-            required = required_xp(player.pace)
-            if player.pace_xp < required:
-                break
-            player.pace_xp -= required
-            player.pace += 1
+        # Calculate XP based on potential, ambition, consistency, and training ground
+        xp = calculate_training_xp(
+            potential=player.potential,
+            ambition=player.ambition,
+            consistency=player.consistency,
+            training_ground_boost=training_ground.xp_boost
+        )
+
+        stat.pace_xp += int(xp)
+
 
         # === Passing ===
-        player.passing_xp += xp_gain
-        while True:
-            required = required_xp(player.passing)
-            if player.passing_xp < required:
-                break
-            player.passing_xp -= required
-            player.passing += 1
+        xp = calculate_training_xp(
+            potential=player.potential,
+            ambition=player.ambition,
+            consistency=player.consistency,
+            training_ground_boost=training_ground.xp_boost
+        )
+        stat.passing_xp += int(xp)
+
 
         # === Defending ===
-        player.defending_xp += xp_gain
-        while True:
-            required = required_xp(player.defending)
-            if player.defending_xp < required:
-                break
-            player.defending_xp -= required
-            player.defending += 1
+        xp = calculate_training_xp(
+            potential=player.potential,
+            ambition=player.ambition,
+            consistency=player.consistency,
+            training_ground_boost=training_ground.xp_boost
+        )
+        stat.defending_xp += int(xp)
 
         session.add(player)
 
@@ -143,6 +156,7 @@ def train_club(club_id: int, session: Session = Depends(get_session)):
             "defending": player.defending,
             "defending_xp": player.defending_xp
         })
+        
 
     # Step 5: Save changes and return
     session.commit()
@@ -151,6 +165,20 @@ def train_club(club_id: int, session: Session = Depends(get_session)):
         "xp_gain": xp_gain,
         "players_trained": updated_players
     }
+print("Training club:", club_id)
+
+players = session.query(Player).filter_by(club_id=club_id).all()
+print("Found players:", len(players))
+
+for player in players:
+    print(f" - Player: {player.name} (id: {player.id}, potential: {player.potential})")
+
+    stat = session.query(PlayerStat).filter_by(player_id=player.id).first()
+    if stat:
+        print(f"   - Found PlayerStat. Current pace_xp: {stat.pace_xp}")
+    else:
+        print("   - No PlayerStat found for this player")
+
 
 
 
