@@ -21,3 +21,28 @@ class PlayerStat(SQLModel, table=True):
 
     # Links both sides of the relationship.
     player: Optional["Player"] = Relationship(back_populates="stats")
+
+# HELPER FUNCTION
+from sqlmodel import select
+from models import StatLevelRequirement
+
+def get_stat_level(xp: int, session) -> int:
+    """
+    Given the current XP for a stat, return the correct level
+    using the StatLevelRequirement table.
+
+    It finds the highest level where xp_required <= current XP.
+    """
+    # Query all levels where xp_required <= xp, sorted by highest XP first
+    result = session.exec(
+        select(StatLevelRequirement)
+        .where(StatLevelRequirement.xp_required <= xp)
+        .order_by(StatLevelRequirement.xp_required.desc())
+    ).first()
+
+    # If we found a matching level, return it
+    if result:
+        return result.level
+
+    # Default fallback: Level 1
+    return 1
