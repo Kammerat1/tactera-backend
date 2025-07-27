@@ -80,6 +80,23 @@ def register_club(data: ClubRegister, session: Session = Depends(get_session)):
 
 @router.post("/{club_id}")
 def train_club(club_id: int, session: Session = Depends(get_session)):
+
+    print("Training club:", club_id)
+
+    players = session.query(Player).filter_by(club_id=club_id).all()
+    print("Found players:", len(players))
+
+    for player in players:
+        print(f" - Player: {player.name} (id: {player.id}, potential: {player.potential})")
+
+        stat = session.query(PlayerStat).filter_by(player_id=player.id).first()
+        if stat:
+            print(f"   - Found PlayerStat. Current pace_xp: {stat.pace_xp}")
+        else:
+            print("   - No PlayerStat found for this player")
+
+
+
     # Step 1: Fetch the club
     club = session.get(Club, club_id)
     if not club:
@@ -165,20 +182,7 @@ def train_club(club_id: int, session: Session = Depends(get_session)):
         "xp_gain": xp_gain,
         "players_trained": updated_players
     }
-print("Training club:", club_id)
-
-players = session.query(Player).filter_by(club_id=club_id).all()
-print("Found players:", len(players))
-
-for player in players:
-    print(f" - Player: {player.name} (id: {player.id}, potential: {player.potential})")
-
-    stat = session.query(PlayerStat).filter_by(player_id=player.id).first()
-    if stat:
-        print(f"   - Found PlayerStat. Current pace_xp: {stat.pace_xp}")
-    else:
-        print("   - No PlayerStat found for this player")
-
+    
 
 
 
