@@ -1,7 +1,7 @@
 # player_stat.py
 
 from typing import Optional
-from sqlmodel import SQLModel, Field
+from sqlmodel import SQLModel, Field, Relationship
 
 # PlayerStat model tracks individual stats for each player
 class PlayerStat(SQLModel, table=True):
@@ -18,3 +18,6 @@ class PlayerStat(SQLModel, table=True):
 
     # XP earned toward leveling up this stat
     xp: int = Field(default=0)
+
+    # Links both sides of the relationship.
+    player: Optional["Player"] = Relationship(back_populates="stats")

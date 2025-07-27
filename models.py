@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from datetime import datetime, date
 
 
+
 # === REQUEST MODELS ===
 
 class ManagerRegister(BaseModel):
@@ -56,6 +57,8 @@ class Player(SQLModel, table=True):
     weight_kg: int
     preferred_foot: str  # "left", "right", or "both"
     is_goalkeeper: bool
+    stats: List["PlayerStat"] = Relationship(back_populates="player")
+
 
     # HIDDEN STATS
     ambition: int

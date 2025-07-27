@@ -173,12 +173,12 @@ def train_club(club_id: int, session: Session = Depends(get_session)):
         updated_players.append({
             "player_id": player.id,
             "name": player.name,
-            "pace": player.pace,
-            "pace_xp": player.pace_xp,
-            "passing": player.passing,
-            "passing_xp": player.passing_xp,
-            "defending": player.defending,
-            "defending_xp": player.defending_xp
+            "pace": next((s.value for s in player.stats if s.stat_name == "pace"), None),
+            "pace_xp": next((s.xp for s in player.stats if s.stat_name == "pace"), None),
+            "passing": next((s.value for s in player.stats if s.stat_name == "passing"), None),
+            "passing_xp": next((s.xp for s in player.stats if s.stat_name == "passing"), None),
+            "defending": next((s.value for s in player.stats if s.stat_name == "defending"), None),
+            "defending_xp": next((s.xp for s in player.stats if s.stat_name == "defending"), None),
         })
         
 
