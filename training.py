@@ -56,7 +56,7 @@ def get_consistency_variance(consistency: int) -> float:
     if consistency >= 90:
         if roll < 0.05:
             return random.uniform(0.6, 0.9)   # Bad
-        elif roll < 0.75:
+        elif roll < 0.50:
             return random.uniform(0.9, 1.1)   # Average
         else:
             return random.uniform(1.1, 1.3)   # Good
@@ -64,7 +64,7 @@ def get_consistency_variance(consistency: int) -> float:
     elif consistency >= 70:
         if roll < 0.10:
             return random.uniform(0.6, 0.9)
-        elif roll < 0.80:
+        elif roll < 0.70:
             return random.uniform(0.9, 1.1)
         else:
             return random.uniform(1.1, 1.3)
@@ -86,9 +86,9 @@ def get_consistency_variance(consistency: int) -> float:
             return random.uniform(1.1, 1.3)
 
     else:
-        if roll < 0.4:
+        if roll < 0.40:
             return random.uniform(0.6, 0.9)
-        elif roll < 0.9:
+        elif roll < 0.90:
             return random.uniform(0.9, 1.1)
         else:
             return random.uniform(1.1, 1.3)
@@ -101,11 +101,18 @@ def calculate_training_xp(
     training_ground_boost: int
 ) -> float:
     
-    if ambition >= 950:
+
+    """
+    Calculate the total XP a player earns in a training session.
+
+    XP = potential × ambition modifier × training ground boost × consistency variance
+    """
+    potential_factor = potential
+    if ambition >= 95:
         ambition_factor = 1.2
-    if ambition >= 90:
+    elif ambition >= 90:
         ambition_factor = 1.1
-    if ambition >= 80:
+    elif ambition >= 80:
         ambition_factor = 1.0
     elif ambition >= 60:
         ambition_factor = 0.9
@@ -113,13 +120,6 @@ def calculate_training_xp(
         ambition_factor = 0.70
     else:
         ambition_factor = 0.6
-    """
-    Calculate the total XP a player earns in a training session.
-
-    XP = potential × ambition modifier × training ground boost × consistency variance
-    """
-    ambition_factor = ambition / 100
-    potential_factor = potential
     tg_factor = 1 + (training_ground_boost / 100)
     variance = get_consistency_variance(consistency)
 
