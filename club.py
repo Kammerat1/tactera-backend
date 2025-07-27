@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 from models import Club, Player, TrainingGround
-from player_stat import PlayerStat
+from player_stat import PlayerStat, get_stat_level
 from database import get_session
 from club_models import ClubRegister
 from datetime import datetime
@@ -86,18 +86,6 @@ def train_club(club_id: int, session: Session = Depends(get_session)):
     players = session.query(Player).filter_by(club_id=club_id).all()
     print("Found players:", len(players))
 
-    for player in players:
-        print(f" - Player: {player.name} (id: {player.id}, potential: {player.potential})")
-
-        stat = session.query(PlayerStat).filter_by(player_id=player.id).first()
-        if stat.stat_name == "pace":
-            print(f"   - Found 'pace' stat. Current XP: {stat.xp}")
-
-        else:
-            print("   - No PlayerStat found for this player")
-
-
-
     # Step 1: Fetch the club
     club = session.get(Club, club_id)
     if not club:
@@ -120,66 +108,71 @@ def train_club(club_id: int, session: Session = Depends(get_session)):
     xp_gain = training_ground.xp_boost
     updated_players = []
 
-    def required_xp(stat_value: int) -> int:
-        if stat_value <= 10:
-            return 100
-        return 100 + (stat_value - 10) * 10
-
     for player in players:
+        # Get all PlayerStat rows for this player
+        player_stats = session.exec(
+            select(PlayerStat).where(PlayerStat.player_id == player.id)
+        ).all()
 
-        stat = session.query(PlayerStat).filter_by(player_id=player.id).first()
-        if not stat:
-            continue  # or optionally create a new PlayerStat row
+        # All 10 stats we support
+        stat_names = [
+            "passing", "finishing", "dribbling", "tackling", "first_touch",
+            "vision", "positioning", "pace", "stamina", "strength"
+        ]
 
-        # === Pace ===
-        # Calculate XP based on potential, ambition, consistency, and training ground
-        xp = calculate_training_xp(
-            potential=player.potential,
-            ambition=player.ambition,
-            consistency=player.consistency,
-            training_ground_boost=training_ground.xp_boost
-        )
+        # Loop through each stat the player should have
+        for stat_name in stat_names:
+            # Try to find existing stat row
+            stat = next((s for s in player_stats if s.stat_name == stat_name), None)
 
-        if stat.stat_name == "passing":
-            stat.xp += int(xp)
-            print(f"   - Added {int(xp)} XP to 'pace'. New XP: {stat.xp}")
+            if not stat:
+                # If not found, create it with default value and 0 XP
+                stat = PlayerStat(
+                    player_id=player.id,
+                    stat_name=stat_name,
+                    value=1,
+                    xp=0
+                )
+                session.add(stat)
+                session.commit()
+                session.refresh(stat)
+                player_stats.append(stat)
 
+            # Calculate training XP using player traits and training ground
+            xp_gain = calculate_training_xp(
+                potential=player.potential,
+                ambition=player.ambition,
+                consistency=player.consistency,
+                training_ground_boost=training_ground.xp_boost
+            )
 
-        # === Passing ===
-        xp = calculate_training_xp(
-            potential=player.potential,
-            ambition=player.ambition,
-            consistency=player.consistency,
-            training_ground_boost=training_ground.xp_boost
-        )
-        if stat.stat_name == "passing":
-            stat.xp += int(xp)
-            print(f"   - Added {int(xp)} XP to 'passing'. New XP: {stat.xp}")
+            # Add XP to this stat
+            stat.xp += int(xp_gain)
 
+            # Update stat value using helper function
+            stat.value = get_stat_level(stat.xp, session)
 
-        # === Defending ===
-        xp = calculate_training_xp(
-            potential=player.potential,
-            ambition=player.ambition,
-            consistency=player.consistency,
-            training_ground_boost=training_ground.xp_boost
-        )
-        if stat.stat_name == "defending":
-            stat.xp += int(xp)
-            print(f"   - Added {int(xp)} XP to 'defending'. New XP: {stat.xp}")
+            # Save updated stat
+            session.add(stat)
 
-        session.add(player)
+        # 📦 After all stats have been updated, prepare return data
+        stat_summary = {
+            stat.stat_name: {
+                "value": stat.value,
+                "xp": stat.xp
+            }
+            for stat in player_stats
+        }
 
         updated_players.append({
             "player_id": player.id,
             "name": player.name,
-            "pace": next((s.value for s in player.stats if s.stat_name == "pace"), None),
-            "pace_xp": next((s.xp for s in player.stats if s.stat_name == "pace"), None),
-            "passing": next((s.value for s in player.stats if s.stat_name == "passing"), None),
-            "passing_xp": next((s.xp for s in player.stats if s.stat_name == "passing"), None),
-            "defending": next((s.value for s in player.stats if s.stat_name == "defending"), None),
-            "defending_xp": next((s.xp for s in player.stats if s.stat_name == "defending"), None),
+            "stats": stat_summary
         })
+
+
+
+
         
 
     # Step 5: Save changes and return
