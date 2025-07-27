@@ -140,7 +140,7 @@ def train_club(club_id: int, session: Session = Depends(get_session)):
             training_ground_boost=training_ground.xp_boost
         )
 
-        if stat.stat_name == "pace":
+        if stat.stat_name == "passing":
             stat.xp += int(xp)
             print(f"   - Added {int(xp)} XP to 'pace'. New XP: {stat.xp}")
 

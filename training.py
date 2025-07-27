@@ -120,7 +120,7 @@ def calculate_training_xp(
         ambition_factor = 0.70
     else:
         ambition_factor = 0.6
-    tg_factor = 1 + (training_ground_boost / 100)
+    tg_factor = (training_ground_boost / 100)
     variance = get_consistency_variance(consistency)
 
     xp = (potential ** 1.15) * ambition_factor * tg_factor * variance
