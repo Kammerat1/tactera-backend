@@ -123,7 +123,7 @@ def calculate_training_xp(
     tg_factor = 1 + (training_ground_boost / 100)
     variance = get_consistency_variance(consistency)
 
-    xp = potential_factor * ambition_factor * tg_factor * variance
+    xp = (potential ** 1.15) * ambition_factor * tg_factor * variance
     return round(xp, 2)
 
 def split_xp_among_stats(total_xp: float, stat_list: List[str]) -> Dict[str, float]:
