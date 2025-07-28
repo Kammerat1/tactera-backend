@@ -4,7 +4,7 @@ from database import get_session
 from models import Player
 from models import StatLevelRequirement
 from typing import Optional
-from models import TrainingSession
+from models import TrainingHistory
 
 
 
@@ -207,7 +207,7 @@ def log_training_session(
 
 
     # ✅ Save the training session to the database
-    new_session = TrainingSession(
+    new_session = TrainingHistory(
         player_id=player_id,
         pace_xp=pace,
         passing_xp=passing,

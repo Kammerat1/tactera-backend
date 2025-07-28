@@ -156,7 +156,8 @@ from database import get_session
 from models import Club
 
 router = APIRouter()
-
+'''
+# DEPRECATED - NOW IN CLUB.PY
 @router.post("/clubs/{club_id}/train")
 def train_club(club_id: int, session: Session = Depends(get_session)):
     # Get today's date
@@ -223,6 +224,6 @@ def train_club(club_id: int, session: Session = Depends(get_session)):
     return {
         "message": "Training complete (dry run)",
         "players": training_data
-    }
+    } '''
 
 

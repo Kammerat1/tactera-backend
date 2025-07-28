@@ -38,7 +38,7 @@ class Club(SQLModel, table=True):
 
     # Link to the training ground this club owns
     trainingground_id: Optional[int] = Field(default=None, foreign_key="trainingground.id")
-    last_training_date: Optional[date] = None
+    last_training_date: Optional[date] = Field(default=None, nullable=True)     
 
     # One-to-many: Club has many players
     squad: List["Player"] = Relationship(back_populates="club")
@@ -115,24 +115,35 @@ from sqlmodel import Session
 from database import engine
 
         # 👇 NEW: Table to store each training session
-class TrainingSession(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)  # unique ID for this session
+# 🆕 TrainingHistory: Records each club training event
+class TrainingHistory(SQLModel, table=True):
+    """
+    Logs a single training event for a club.
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    club_id: int = Field(foreign_key="club.id")              # Which club trained
+    date: datetime = Field(default_factory=datetime.utcnow)  # When training occurred
+    drill_name: str                                        # Drill used during training
+    total_xp: float                                        # Total XP given across all players
 
-    player_id: int = Field(foreign_key="player.id")  # which player trained
-    player: Optional["Player"] = Relationship()      # optional relationship if needed later
+    # One-to-many relationship to detailed stat updates
+    stats: List["TrainingHistoryStat"] = Relationship(back_populates="history")
 
-    timestamp: datetime = Field(default_factory=datetime.utcnow)  # when the session happened
 
-    # XP gained in this session — not total
-    pace_xp: int = Field(default=0)
-    passing_xp: int = Field(default=0)
-    defending_xp: int = Field(default=0)
+# 🆕 TrainingHistoryStat: Detailed per-player stat gains
+class TrainingHistoryStat(SQLModel, table=True):
+    """
+    Tracks XP gains for individual players and stats during a training event.
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    history_id: int = Field(foreign_key="traininghistory.id")  # Link to the training history event
+    player_id: int = Field(foreign_key="player.id")            # Player who trained
+    stat_name: str                                             # Stat name (e.g., "passing")
+    xp_gained: float                                           # XP gained for this stat
+    new_value: int                                             # New stat value after XP applied
 
-    drill: str  # short label like "Speed Drill"
-    note: Optional[str] = None  # optional details or notes
-
-from sqlmodel import SQLModel, Field, Relationship
-from typing import Optional, List
+    # Backref to parent history record
+    history: "TrainingHistory" = Relationship(back_populates="stats")
 
 # 🌍 Country model: represents a nation that hosts leagues
 class Country(SQLModel, table=True):

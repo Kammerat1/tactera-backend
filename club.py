@@ -2,15 +2,14 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
-from models import Club, Player, TrainingGround
+from models import Club, Player, TrainingGround, TrainingHistory, TrainingHistoryStat
 from player_stat import PlayerStat, get_stat_level
 from database import get_session
 from club_models import ClubRegister
-from datetime import datetime
+from datetime import datetime, date
 import random
 from training import calculate_training_xp, split_xp_among_stats, DRILLS
 from pydantic import BaseModel
-
 
 router = APIRouter()
 
@@ -101,6 +100,10 @@ def train_club(club_id: int, data: TrainingRequest, session: Session = Depends(g
     training_ground = session.get(TrainingGround, club.trainingground_id)
     if not training_ground:
         raise HTTPException(status_code=404, detail="Training ground not found.")
+    
+    # ✅ Training cooldown check - WORKING - DEACTIVATED.
+    # if club.last_training_date == date.today():
+    #    raise HTTPException(status_code=400, detail="Training already completed today. Try again tomorrow.")
 
     # Validate the chosen drill
     selected_drill = next((d for d in DRILLS if d["name"].lower() == data.drill_name.lower()), None)
@@ -121,7 +124,7 @@ def train_club(club_id: int, data: TrainingRequest, session: Session = Depends(g
     # Step 4: Apply training
     xp_gain = training_ground.xp_boost
     updated_players = []
-
+    
     for player in players:
         # Get all PlayerStat rows for this player
         player_stats = session.exec(
@@ -177,7 +180,31 @@ def train_club(club_id: int, data: TrainingRequest, session: Session = Depends(g
             "stats": stat_summary
             })
 
+    # ✅ Update last training date on success
+    club.last_training_date = date.today()
+    session.add(club)
 
+    # 1️⃣ Create main history record
+    history = TrainingHistory(
+        club_id=club.id,
+        drill_name=selected_drill["name"],
+        total_xp=sum([p["total_xp_earned"] for p in updated_players])
+    )
+    session.add(history)
+    session.commit()  # Commit so history gets an ID
+
+    # 2️⃣ Add detailed per-player stat logs
+    for player_data in updated_players:
+        player_id = player_data["player_id"]
+        for stat_name, stat_info in player_data["stats"].items():
+            stat_history = TrainingHistoryStat(
+                history_id=history.id,
+                player_id=player_id,
+                stat_name=stat_name,
+                xp_gained=stat_info["delta_xp"],
+                new_value=stat_info["value"]
+            )
+            session.add(stat_history)
 
 
 
@@ -201,3 +228,49 @@ def get_training_drills():
     """
     return {"available_drills": DRILLS}
 
+# GET TRAINING HISTORY ENDPOINT
+@router.get("/{club_id}/training/history")
+def get_training_history(club_id: int, session: Session = Depends(get_session), limit: int = 600):
+    """
+    Returns the most recent training history for a club (up to 600 sessions).
+    If fewer sessions exist, return all available.
+    """
+    # 1️⃣ Validate club
+    club = session.get(Club, club_id)
+    if not club:
+        raise HTTPException(status_code=404, detail="Club not found.")
+
+    # 2️⃣ Fetch up to 600 recent sessions (or fewer if less exist)
+    history_records = session.exec(
+        select(TrainingHistory)
+        .where(TrainingHistory.club_id == club_id)
+        .order_by(TrainingHistory.date.desc())
+        .limit(limit)  # ✅ Limit is now 600 by default
+    ).all()
+
+    result = []
+    for history in history_records:
+        # Fetch stat details
+        stat_entries = session.exec(
+            select(TrainingHistoryStat).where(TrainingHistoryStat.history_id == history.id)
+        ).all()
+
+        # Group stats per player
+        player_stats = {}
+        for stat in stat_entries:
+            if stat.player_id not in player_stats:
+                player_stats[stat.player_id] = []
+            player_stats[stat.player_id].append({
+                "stat_name": stat.stat_name,
+                "xp_gained": stat.xp_gained,
+                "new_value": stat.new_value
+            })
+
+        result.append({
+            "date": history.date,
+            "drill_name": history.drill_name,
+            "total_xp": history.total_xp,
+            "player_stats": player_stats
+        })
+
+    return {"club_id": club_id, "history": result}
