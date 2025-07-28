@@ -8,7 +8,8 @@ from database import get_session
 from club_models import ClubRegister
 from datetime import datetime
 import random
-from training import calculate_training_xp, split_xp_among_stats
+from training import calculate_training_xp, split_xp_among_stats, DRILLS
+from pydantic import BaseModel
 
 
 router = APIRouter()
@@ -78,13 +79,13 @@ def register_club(data: ClubRegister, session: Session = Depends(get_session)):
 
 # === TRAINING ENDPOINT ===
 
-# Pick the drill (temporary: fixed as "Squad Cohesion")
-drill_name = "Squad Cohesion"
-affected_stats = ["passing", "vision", "stamina", "strength", "positioning"]
+# Allow managers to pick their own drill
+class TrainingRequest(BaseModel):
+    drill_name: str
 
-
+# Endpoint to train a club's squad
 @router.post("/{club_id}")
-def train_club(club_id: int, session: Session = Depends(get_session)):
+def train_club(club_id: int, data: TrainingRequest, session: Session = Depends(get_session)):
 
     print("Training club:", club_id)
 
@@ -100,6 +101,14 @@ def train_club(club_id: int, session: Session = Depends(get_session)):
     training_ground = session.get(TrainingGround, club.trainingground_id)
     if not training_ground:
         raise HTTPException(status_code=404, detail="Training ground not found.")
+
+    # Validate the chosen drill
+    selected_drill = next((d for d in DRILLS if d["name"].lower() == data.drill_name.lower()), None)
+
+    if not selected_drill:
+        raise HTTPException(status_code=400, detail=f"Invalid drill: {data.drill_name}")
+
+    affected_stats = selected_drill["affected_stats"]
 
 
     # Step 3: Get the squad
@@ -155,21 +164,18 @@ def train_club(club_id: int, session: Session = Depends(get_session)):
 
         # 📦 After all stats have been updated, prepare return data
         stat_summary = {}
-    for stat in player_stats:
-        stat_summary[stat.stat_name] = {
-        "value": stat.value,
-        "xp": stat.xp,
-        "delta_xp": delta_map.get(stat.stat_name, 0)
-    }
-
-
-
+        for stat in player_stats:
+            stat_summary[stat.stat_name] = {
+                "value": stat.value,
+                "xp": stat.xp,
+                "delta_xp": delta_map.get(stat.stat_name, 0)
+            }
         updated_players.append({
             "player_id": player.id,
             "name": player.name,
             "total_xp_earned": int(total_xp),
             "stats": stat_summary
-        })
+            })
 
 
 
@@ -185,8 +191,13 @@ def train_club(club_id: int, session: Session = Depends(get_session)):
         "total_xp_earned": xp_gain,
         "players_trained": updated_players
     }
-    
 
+# GET TRAINING DRILLS ENDPOINT
 
+@router.get("/training/drills")
+def get_training_drills():
+    """
+    Returns all available training drills and their affected stats.
+    """
+    return {"available_drills": DRILLS}
 
-    session.commit()
