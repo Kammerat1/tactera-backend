@@ -230,32 +230,48 @@ def get_training_drills():
 
 # GET TRAINING HISTORY ENDPOINT
 @router.get("/{club_id}/training/history")
-def get_training_history(club_id: int, session: Session = Depends(get_session), limit: int = 600):
+def get_training_history(
+    club_id: int,
+    session: Session = Depends(get_session),
+    page: int = 1,            # ✅ Optional page number (default 1)
+    limit: int = 600          # ✅ Default limit stays 600
+):
     """
-    Returns the most recent training history for a club (up to 600 sessions).
-    If fewer sessions exist, return all available.
+    Returns paginated training history for a club.
+    - Default: last 600 sessions (page=1, limit=600)
+    - Supports pagination: ?page=2&limit=50
     """
     # 1️⃣ Validate club
     club = session.get(Club, club_id)
     if not club:
         raise HTTPException(status_code=404, detail="Club not found.")
 
-    # 2️⃣ Fetch up to 600 recent sessions (or fewer if less exist)
+    # 1.1 Count total training sessions for this club
+    total_count = session.exec(
+        select(TrainingHistory).where(TrainingHistory.club_id == club_id)
+    ).all()
+
+    total_count = len(total_count)
+
+
+    # 2️⃣ Calculate offset for pagination
+    offset = (page - 1) * limit
+
+    # 3️⃣ Fetch paginated sessions
     history_records = session.exec(
         select(TrainingHistory)
         .where(TrainingHistory.club_id == club_id)
         .order_by(TrainingHistory.date.desc())
-        .limit(limit)  # ✅ Limit is now 600 by default
+        .offset(offset)        # ✅ Skip previous pages
+        .limit(limit)          # ✅ Fetch only this page
     ).all()
 
     result = []
     for history in history_records:
-        # Fetch stat details
         stat_entries = session.exec(
             select(TrainingHistoryStat).where(TrainingHistoryStat.history_id == history.id)
         ).all()
 
-        # Group stats per player
         player_stats = {}
         for stat in stat_entries:
             if stat.player_id not in player_stats:
@@ -273,4 +289,11 @@ def get_training_history(club_id: int, session: Session = Depends(get_session), 
             "player_stats": player_stats
         })
 
-    return {"club_id": club_id, "history": result}
+    return {
+        "club_id": club_id,
+        "page": page,
+        "limit": limit,
+        "total_count": total_count,
+        "history": result
+    }
+
