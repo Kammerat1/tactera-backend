@@ -1,8 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 from database import get_session
-from models import Player
-from models import StatLevelRequirement
+from models import StatLevelRequirement, Player, TrainingHistory, TrainingHistoryStat
 from typing import Optional
 
 
@@ -170,4 +169,62 @@ def get_player_stat_levels(player_id: int, session: Session = Depends(get_sessio
             "level": defending_level,
             "xp": player.defending_xp
         }
+    }
+
+@router.get("/{player_id}/training/history")
+def get_player_training_history(
+    player_id: int,
+    session: Session = Depends(get_session),
+    page: int = 1,
+    limit: int = 100
+):
+    """
+    Returns a player's individual training history.
+    Shows date, drill used, stat trained, XP gained, and new stat value.
+    Supports pagination.
+    """
+    # 1️⃣ Verify player exists
+    player = session.get(Player, player_id)
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found.")
+
+    # 2️⃣ Count total history entries for this player
+    total_count = len(
+        session.exec(
+            select(TrainingHistoryStat).where(TrainingHistoryStat.player_id == player_id)
+        ).all()
+    )
+
+    # 3️⃣ Calculate pagination offset
+    offset = (page - 1) * limit
+
+    # 4️⃣ Fetch the player's training stat logs (latest first)
+    stat_entries = session.exec(
+        select(TrainingHistoryStat)
+        .where(TrainingHistoryStat.player_id == player_id)
+        .order_by(TrainingHistoryStat.id.desc())
+        .offset(offset)
+        .limit(limit)
+    ).all()
+
+    # 5️⃣ Build the response
+    history = []
+    for stat_entry in stat_entries:
+        # Fetch linked training session (for date & drill info)
+        history_record = session.get(TrainingHistory, stat_entry.history_id)
+        history.append({
+            "date": history_record.date,
+            "drill_name": history_record.drill_name,
+            "stat_name": stat_entry.stat_name,
+            "xp_gained": stat_entry.xp_gained,
+            "new_value": stat_entry.new_value
+        })
+
+    return {
+        "player_id": player_id,
+        "player_name": player.name,
+        "page": page,
+        "limit": limit,
+        "total_count": total_count,
+        "history": history
     }
