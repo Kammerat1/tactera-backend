@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select, Field
-from tactera_backend.models.models import Club, TrainingGround, TrainingHistory, TrainingHistoryStat
+from tactera_backend.models.models import TrainingGround, TrainingHistory, TrainingHistoryStat
 from tactera_backend.models.player_stat import PlayerStat, get_stat_level
 from tactera_backend.core.database import get_session
 from tactera_backend.models.club_models import ClubRegister
@@ -11,6 +11,27 @@ from datetime import datetime, date
 import random
 from tactera_backend.services.training import calculate_training_xp, split_xp_among_stats, DRILLS
 from pydantic import BaseModel
+
+# Club Model (moved from models.py)
+from typing import Optional, List
+from sqlmodel import SQLModel, Field, Relationship
+
+class Club(SQLModel, table=True):
+    """Database model for clubs in Tactera"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    manager_email: Optional[str] = Field(default=None, foreign_key="manager.email", nullable=True)
+    is_bot: bool = Field(default=False)
+
+    league_id: Optional[int] = Field(default=None, foreign_key="league.id")
+    league: Optional["League"] = Relationship(back_populates="clubs")
+
+    trainingground_id: Optional[int] = Field(default=None, foreign_key="trainingground.id")
+    training_ground: Optional["TrainingGround"] = Relationship(back_populates="club")
+
+    manager: Optional["Manager"] = Relationship(back_populates="club")
+    squad: List["Player"] = Relationship(back_populates="club")
+
 
 router = APIRouter()
 

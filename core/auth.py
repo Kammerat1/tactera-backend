@@ -3,8 +3,7 @@ from sqlmodel import Session, select
 from passlib.context import CryptContext
 
 from tactera_backend.core.database import get_session
-from tactera_backend.models.models import Manager, ManagerRegister, ManagerLogin
-
+from tactera_backend.models.manager import Manager, ManagerRegister, ManagerLogin
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 

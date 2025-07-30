@@ -1,7 +1,8 @@
 from sqlmodel import SQLModel, Session
 from fastapi import FastAPI
 from tactera_backend.models.player_stat import PlayerStat
-from tactera_backend.models.models import Manager, Club, MatchResult, TrainingGround
+from tactera_backend.models.models import Club, MatchResult, TrainingGround
+from tactera_backend.models.manager import Manager
 from tactera_backend.models.player import Player
 from tactera_backend.models.models import*  # This ensures Stadium + StadiumPart are included
 

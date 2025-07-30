@@ -3,22 +3,6 @@ from typing import Optional, List
 from pydantic import BaseModel
 from datetime import datetime, date
 
-# Club model
-class Club(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    name: str
-    manager_email: Optional[str] = Field(default=None, foreign_key="manager.email", nullable=True)
-    is_bot: bool = Field(default=False)
-
-    league_id: Optional[int] = Field(default=None, foreign_key="league.id")
-    league: Optional["League"] = Relationship(back_populates="clubs")
-
-    trainingground_id: Optional[int] = Field(default=None, foreign_key="trainingground.id")
-    last_training_date: Optional[date] = Field(default=None, nullable=True)
-
-    squad: List["Player"] = Relationship(back_populates="club")
-    manager: Optional[Manager] = Relationship(back_populates="club")
-
 # League model
 class League(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
