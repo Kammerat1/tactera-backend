@@ -57,7 +57,12 @@ class Player(SQLModel, table=True):
     weight_kg: int
     preferred_foot: str  # "left", "right", or "both"
     is_goalkeeper: bool
-    stats: List["PlayerStat"] = Relationship(back_populates="player")
+    
+    # ⚠️ Relationship temporarily defined without auto-mapping.
+    # PlayerStat lives in player_stat.py, and defining it here directly caused SQLAlchemy to fail
+    # due to cross-file class resolution timing. The back_populates binding will be applied
+    # manually in player_stat.py after PlayerStat is defined.
+    stats: List["PlayerStat"] = Relationship(sa_relationship=False)
 
 
     # HIDDEN STATS
@@ -235,4 +240,3 @@ class StadiumPart(SQLModel, table=True):
     type: str  # e.g., 'stand_home', 'stand_away', 'stand_north', 'stand_south', 'pitch'
     level: int
     durability: int
-

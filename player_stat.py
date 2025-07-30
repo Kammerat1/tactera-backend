@@ -2,6 +2,8 @@
 
 from typing import Optional
 from sqlmodel import SQLModel, Field, Relationship
+from sqlmodel import select
+from models import StatLevelRequirement
 
 # PlayerStat model tracks individual stats for each player
 class PlayerStat(SQLModel, table=True):
@@ -22,10 +24,14 @@ class PlayerStat(SQLModel, table=True):
     # Links both sides of the relationship.
     player: Optional["Player"] = Relationship(back_populates="stats")
 
-# HELPER FUNCTION
-from sqlmodel import select
-from models import StatLevelRequirement
+# ✅ Manually bind Player.stats <-> PlayerStat.player relationship here.
+# This is necessary because Player is defined in models.py and PlayerStat here.
+# Defining it in models.py directly caused SQLAlchemy class resolution errors,
+# so we defer the binding until both classes exist.
+from models import Player
+Player.stats = Relationship(back_populates="player")
 
+# HELPER FUNCTION
 def get_stat_level(xp: int, session) -> int:
     """
     Given the current XP for a stat, return the correct level

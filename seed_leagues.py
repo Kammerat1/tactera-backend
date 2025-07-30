@@ -1,37 +1,108 @@
-from sqlmodel import Session, SQLModel, create_engine
-from models import Country, League
+"""
+seed_leagues.py
+---------------
+Seeds nations (countries) and leagues into the database from league_config.py.
 
-# Connect to the database
-sqlite_file_name = "tactera.db"
-engine = create_engine(f"sqlite:///{sqlite_file_name}")
+✅ Supports "delta seeding":
+   - Only inserts missing countries or leagues (won't overwrite existing data).
+   - Safe to run multiple times or after adding new nations/leagues.
 
-# Create tables if they don't exist
-SQLModel.metadata.create_all(engine)
+Usage:
+    python seed_leagues.py
+"""
 
-# Seed data
-with Session(engine) as session:
-    # Check if Denmark already exists
-    from sqlmodel import select
+from sqlmodel import Session, select
+from database import engine
+# Import only what's needed for seeding to avoid triggering PlayerStat
+from sqlmodel import SQLModel, Field, Relationship
+from typing import Optional, List
 
-    existing_country = session.exec(
-    select(Country).where(Country.name == "Denmark")
+# Local league models for seeding only (matches DB schema exactly)
+class Country(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    leagues: List["League"] = Relationship(back_populates="country")
+
+class League(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    tier: int
+    group: Optional[int] = Field(default=None)
+    country_id: int = Field(foreign_key="country.id")
+    country: Optional[Country] = Relationship(back_populates="leagues")
+
+from league_config import league_config
+
+
+def seed_leagues():
+    with Session(engine) as session:
+        print("🌍 Starting league seeding...")
+
+        # Loop through countries in league_config
+        for country_name, country_data in league_config.items():
+            # Check if this country already exists
+            existing_country = session.exec(
+                select(Country).where(Country.name == country_name)
+            ).first()
+
+            if existing_country:
+                print(f"✅ Country already exists: {country_name}")
+                country = existing_country
+            else:
+                print(f"➕ Adding new country: {country_name}")
+                country = Country(name=country_name)
+                session.add(country)
+                session.commit()
+                session.refresh(country)
+
+            # Loop through leagues in this country
+            for league_data in country_data["leagues"]:
+                tier = league_data["tier"]
+
+                # If league has no divisions (tier 1, single table)
+                if "teams" in league_data:
+                    _add_league_if_missing(session, league_data["name"], tier, country.id)
+
+                # If league has multiple divisions (tier 2+)
+                if "divisions" in league_data:
+                    num_groups = len(league_data["divisions"])
+                    for group_num in range(1, num_groups + 1):
+                        _add_league_if_missing(
+                            session,
+                            name=league_data["name"],  # base name (e.g., "Division 2")
+                            tier=tier,
+                            country_id=country.id,
+                            group=group_num
+                        )
+
+
+
+        print("✅ League seeding complete!")
+
+
+def _add_league_if_missing(session: Session, name: str, tier: int, country_id: int, group: Optional[int] = None):
+    """
+    Adds a league if it doesn't already exist in the database.
+    """
+    existing_league = session.exec(
+        select(League).where(
+            League.name == name,
+            League.country_id == country_id,
+            League.group == group
+        )
     ).first()
 
-    if not existing_country:
-        denmark = Country(name="Denmark")
-        session.add(denmark)
-        session.commit()
-        session.refresh(denmark)
 
-        # Add a top league
-        top_league = League(
-            name="Superliga",
-            level=1,
-            country_id=denmark.id
-        )
-        session.add(top_league)
-        session.commit()
+    if existing_league:
+        print(f"   🔁 League already exists: {name}")
+        return
 
-        print("✅ Seeded Denmark and Superliga")
-    else:
-        print("ℹ️ Denmark already seeded")
+    # Create new league
+    print(f"   ➕ Adding new league: {name} (Tier {tier})")
+    league = League(name=name, tier=tier, country_id=country_id, group=group)
+    session.add(league)
+    session.commit()
+
+
+if __name__ == "__main__":
+    seed_leagues()

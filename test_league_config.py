@@ -5,12 +5,12 @@ This script tests that league_config.py loads correctly.
 It prints the configured nations, leagues, and divisions.
 """
 
-from league_config import LEAGUE_CONFIG
+from league_config import league_config
 
 print("✅ League Config Loaded Successfully!\n")
 
 # Loop through nations and display details
-for country_name, country_data in LEAGUE_CONFIG.items():
+for country_name, country_data in league_config.items():
     print(f"🌍 {country_name} (Prestige: {country_data['prestige']})")
 
     for league in country_data["leagues"]:
