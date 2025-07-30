@@ -3,17 +3,6 @@ from typing import Optional, List
 from pydantic import BaseModel
 from datetime import datetime, date
 
-# League model
-class League(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    name: str
-    level: int
-
-    country_id: int = Field(foreign_key="country.id")
-    country: Optional["Country"] = Relationship(back_populates="leagues")
-
-    clubs: List[Club] = Relationship(back_populates="league")
-
 # ⚽ Match model: represents a scheduled fixture between two clubs in a league
 class Match(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
