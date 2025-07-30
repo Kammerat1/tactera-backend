@@ -1,23 +1,24 @@
 from fastapi import FastAPI
 from sqlmodel import SQLModel
-from player_stat import PlayerStat
-from models import Manager, Club, Player, MatchResult, TrainingGround
+from tactera_backend.models.player_stat import PlayerStat
+from tactera_backend.models.models import Manager, Club, MatchResult, TrainingGround
+from tactera_backend.models.player import Player
 from sqlmodel import Session
-from models import *  # This ensures Stadium + StadiumPart are included
+from tactera_backend.models.models import*  # This ensures Stadium + StadiumPart are included
 
 
 
-from auth import router as auth_router
-from club import router as club_router
-from match import router as match_router
-from player_routes import router as player_router
-from seed_xp_levels import safe_seed_stat_levels
-from league_routes import router as league_router
+from tactera_backend.core.auth import router as auth_router
+from tactera_backend.models.club import router as club_router
+from tactera_backend.services.match import router as match_router
+from tactera_backend.routes.player_routes import router as player_router
+from tactera_backend.seed.seed_xp_levels import safe_seed_stat_levels
+from tactera_backend.routes.league_routes import router as league_router
 
 
 
 
-from database import init_db, engine  # ✅ Add engine import here
+from tactera_backend.core.database import init_db, engine  # ✅ Add engine import here
 
 
 app = FastAPI()
@@ -37,7 +38,7 @@ app.include_router(player_router)
 app.include_router(league_router)
 
 # 🧩 Import the training route
-from training import router as training_router
+from tactera_backend.services.training import router as training_router
 
 # 🔌 Connect the training route to the FastAPI app
 # This will activate /clubs/{club_id}/train in Swagger and in the API
