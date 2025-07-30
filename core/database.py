@@ -1,13 +1,10 @@
-from sqlmodel import SQLModel, create_engine, Session
 import os
+from sqlmodel import SQLModel, create_engine, Session
+
 # Delay import to avoid circular import
 def import_stat_model():
     from tactera_backend.models.stat_level_requirement import StatLevelRequirement
     return StatLevelRequirement
-
-
-
-
 
 # --- Absolute database path ---
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # project root
@@ -26,9 +23,6 @@ def get_session():
 def init_db():
     StatLevelRequirement = import_stat_model()
     SQLModel.metadata.create_all(engine)
-    print("\n=== DEBUG: Using Database File ===")
-    print(engine.url)
-
 
 def get_sync_session():
     """Used outside of FastAPI routes, like in seed scripts."""

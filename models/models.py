@@ -3,22 +3,6 @@ from typing import Optional, List
 from pydantic import BaseModel
 from datetime import datetime, date
 
-# Request models for Manager registration and login
-class ManagerRegister(BaseModel):
-    email: str
-    password: str
-
-class ManagerLogin(BaseModel):
-    email: str
-    password: str
-
-# Manager model
-class Manager(SQLModel, table=True):
-    email: str = Field(primary_key=True)
-    password_hash: str
-
-    club: Optional["Club"] = Relationship(back_populates="manager")
-
 # Club model
 class Club(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
