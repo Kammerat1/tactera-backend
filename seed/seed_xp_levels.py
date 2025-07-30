@@ -3,6 +3,23 @@ from openpyxl import load_workbook
 from tactera_backend.core.database import get_session
 from tactera_backend.models.stat_level_requirement import StatLevelRequirement
 
+from sqlalchemy import inspect
+from tactera_backend.core.database import get_session
+from tactera_backend.models.stat_level_requirement import StatLevelRequirement
+
+def debug_print_stat_table():
+    session = next(get_session())
+    insp = inspect(session.bind)
+    cols = insp.get_columns("stat_level_requirement")
+    print("\n=== DEBUG: Database Columns in stat_level_requirement ===")
+    for col in cols:
+        print(f"{col['name']} (nullable={col['nullable']})")
+
+    print("\n=== DEBUG: Model Columns in StatLevelRequirement ===")
+    print(StatLevelRequirement.__table__.columns.keys())
+# END
+
+
 def safe_seed_stat_levels():
     """
     Seeds the StatLevelRequirement table from an Excel file (xp_levels.xlsx).
@@ -33,6 +50,13 @@ def safe_seed_stat_levels():
                 continue
             session.add(StatLevelRequirement(level=int(level), xp_required=int(xp)))
             inserted += 1
+            
+            
+            for obj in session.new:
+                print("\n=== DEBUG: Object Pending Insert ===")
+                print(obj)
+                print(obj.__dict__)  # Shows all fields tracked by SQLAlchemy
+
 
         session.commit()
         print(f"✅ Seeded {inserted} levels into StatLevelRequirement.")

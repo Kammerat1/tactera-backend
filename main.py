@@ -1,9 +1,8 @@
+from sqlmodel import SQLModel, Session
 from fastapi import FastAPI
-from sqlmodel import SQLModel
 from tactera_backend.models.player_stat import PlayerStat
 from tactera_backend.models.models import Manager, Club, MatchResult, TrainingGround
 from tactera_backend.models.player import Player
-from sqlmodel import Session
 from tactera_backend.models.models import*  # This ensures Stadium + StadiumPart are included
 
 
@@ -19,6 +18,9 @@ from tactera_backend.routes.league_routes import router as league_router
 
 
 from tactera_backend.core.database import init_db, engine  # ✅ Add engine import here
+
+
+
 
 
 app = FastAPI()

@@ -2,8 +2,5 @@ from sqlmodel import SQLModel, Field
 
 class StatLevelRequirement(SQLModel, table=True):
     __tablename__ = "stat_level_requirement"
-
-    id: int | None = Field(default=None, primary_key=True)
-    stat_name: str
-    level: int
+    level: int = Field(primary_key=True)
     xp_required: int

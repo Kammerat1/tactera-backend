@@ -1,5 +1,5 @@
 from sqlmodel import Session, SQLModel, create_engine, select
-from tactera_backend.models.models import Club, League,
+from tactera_backend.models.models import Club, League
 from tactera_backend.services.match import Match
 from itertools import combinations
 import random
