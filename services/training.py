@@ -2,7 +2,8 @@
 
 import random
 from typing import List, Dict
-from tactera_backend.models.models import Club, TrainingGround  # Core models
+from tactera_backend.models.club import Club # Club model
+from tactera_backend.models.training_models import TrainingGround  # Core model
 from tactera_backend.models.player_stat import PlayerStat  # Stat model lives in separate file
 from tactera_backend.models.player import Player  # Player model lives in separate file
 

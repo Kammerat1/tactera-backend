@@ -57,31 +57,6 @@ class MatchResult(SQLModel, table=True):
     shots_on_target_away: int
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
-# TrainingGround model
-class TrainingGround(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    tier: str
-    xp_boost: int
-
-# TrainingHistory model
-class TrainingHistory(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    club_id: int = Field(foreign_key="club.id")
-    date: datetime = Field(default_factory=datetime.utcnow)
-    drill_name: str
-    total_xp: float
-    stats: List["TrainingHistoryStat"] = Relationship(back_populates="history")
-
-# TrainingHistoryStat model
-class TrainingHistoryStat(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    history_id: int = Field(foreign_key="traininghistory.id")
-    player_id: int = Field(foreign_key="player.id")
-    stat_name: str
-    xp_gained: float
-    new_value: int
-    history: "TrainingHistory" = Relationship(back_populates="stats")
-
 # Stadium model
 class Stadium(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
