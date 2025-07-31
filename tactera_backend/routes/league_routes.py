@@ -4,56 +4,74 @@ from tactera_backend.core.database import get_session
 from tactera_backend.models.club_model import Club
 from tactera_backend.models.league_model import League
 from tactera_backend.models.match_model import Match
+from tactera_backend.models.season_model import SeasonState
+from datetime import datetime
 
 router = APIRouter()
 
+# ============================================
+# GET FIXTURES
+# ============================================
 @router.get("/league/{league_id}/fixtures")
 def get_fixtures(league_id: int, session: Session = Depends(get_session)):
-    # Get league
+    """
+    Returns all fixtures for a league, grouped by round.
+    Dynamically fetches season info from SeasonState.
+    """
     league = session.exec(select(League).where(League.id == league_id)).first()
     if not league:
         return {"error": "League not found"}
 
-    # Get all matches in the league, sorted by round number
+    # 🔍 Fetch current season info
+    season_state = session.exec(select(SeasonState).where(SeasonState.league_id == league_id)).first()
+    season_number = season_state.season_number if season_state else 1  # Default to 1 if missing
+
     matches = session.exec(
         select(Match)
         .where(Match.league_id == league_id)
         .order_by(Match.round_number)
     ).all()
 
-    # Load club names for home and away teams
     club_ids = list({m.home_club_id for m in matches} | {m.away_club_id for m in matches})
     clubs = session.exec(select(Club).where(Club.id.in_(club_ids))).all()
     club_map = {club.id: club.club_name for club in clubs}
 
-    result = []
-    for m in matches:
-        result.append({
+    result = [
+        {
             "round": m.round_number,
             "home": club_map.get(m.home_club_id, "Unknown"),
             "away": club_map.get(m.away_club_id, "Unknown"),
             "played": m.is_played,
             "score": f"{m.home_goals}-{m.away_goals}" if m.is_played else "Not played"
-        })
+        }
+        for m in matches
+    ]
 
     return {
         "league": league.name,
-        "season": 1,
+        "season": season_number,  # ✅ No more hardcoded value
         "fixtures": result
     }
 
+# ============================================
+# GET STANDINGS
+# ============================================
 @router.get("/league/{league_id}/standings")
 def get_standings(league_id: int, session: Session = Depends(get_session)):
-    # Get league
+    """
+    Returns the league standings dynamically (points, GD, etc.).
+    """
     league = session.exec(select(League).where(League.id == league_id)).first()
     if not league:
         return {"error": "League not found"}
 
-    # Get clubs in league
+    # 🔍 Fetch current season info
+    season_state = session.exec(select(SeasonState).where(SeasonState.league_id == league_id)).first()
+    season_number = season_state.season_number if season_state else 1
+
     clubs = session.exec(select(Club).where(Club.league_id == league_id)).all()
     club_map = {club.id: club.club_name for club in clubs}
 
-    # Initialize stats
     table = {club.id: {
         "club": club_map[club.id],
         "played": 0,
@@ -66,7 +84,6 @@ def get_standings(league_id: int, session: Session = Depends(get_session)):
         "points": 0
     } for club in clubs}
 
-    # Get all played matches
     matches = session.exec(
         select(Match).where(Match.league_id == league_id, Match.is_played == True)
     ).all()
@@ -77,11 +94,9 @@ def get_standings(league_id: int, session: Session = Depends(get_session)):
 
         home["played"] += 1
         away["played"] += 1
-
         home["gf"] += m.home_goals
         home["ga"] += m.away_goals
         home["gd"] = home["gf"] - home["ga"]
-
         away["gf"] += m.away_goals
         away["ga"] += m.home_goals
         away["gd"] = away["gf"] - away["ga"]
@@ -100,29 +115,32 @@ def get_standings(league_id: int, session: Session = Depends(get_session)):
             home["points"] += 1
             away["points"] += 1
 
-    # Sort standings
     sorted_table = sorted(table.values(), key=lambda x: (-x["points"], -x["gd"], -x["gf"]))
 
     return {
         "league": league.name,
-        "season": 1,
+        "season": season_number,  # ✅ No more hardcoded value
         "standings": sorted_table
     }
 
-from datetime import datetime
-from tactera_backend.models.season_model import SeasonState
-
+# ============================================
+# ADVANCE ROUND
+# ============================================
 @router.post("/league/{league_id}/advance-round")
 def advance_round(league_id: int, session: Session = Depends(get_session)):
-    # 🔍 Find the current SeasonState
-    state = session.exec(
-        select(SeasonState).where(SeasonState.league_id == league_id)
-    ).first()
-
+    """
+    Advances the league to the next round.
+    Validates round boundaries.
+    """
+    state = session.exec(select(SeasonState).where(SeasonState.league_id == league_id)).first()
     if not state:
         return {"error": "No SeasonState found for this league."}
 
-    # ⏭️ Advance the round
+    # TODO: Make max rounds dynamic (based on league setup)
+    max_rounds = 30  # ✅ Temporary static limit (e.g., 16 clubs => 30 rounds)
+    if state.current_round >= max_rounds:
+        return {"error": f"Cannot advance: already at final round ({max_rounds})."}
+
     state.current_round += 1
     state.last_round_advanced = datetime.utcnow()
 
