@@ -24,7 +24,7 @@ def get_fixtures(league_id: int, session: Session = Depends(get_session)):
 
     # 🔍 Fetch current season info
     season_state = session.exec(select(SeasonState).where(SeasonState.league_id == league_id)).first()
-    season_number = season_state.season_number if season_state else 1  # Default to 1 if missing
+    season_number = season_state.current_season if season_state else 1  # Default to 1 if missing
 
     matches = session.exec(
         select(Match)
@@ -67,10 +67,10 @@ def get_standings(league_id: int, session: Session = Depends(get_session)):
 
     # 🔍 Fetch current season info
     season_state = session.exec(select(SeasonState).where(SeasonState.league_id == league_id)).first()
-    season_number = season_state.season_number if season_state else 1
+    season_number = season_state.current_season if season_state else 1
 
     clubs = session.exec(select(Club).where(Club.league_id == league_id)).all()
-    club_map = {club.id: club.club_name for club in clubs}
+    club_map = {club.id: club.name for club in clubs}
 
     table = {club.id: {
         "club": club_map[club.id],

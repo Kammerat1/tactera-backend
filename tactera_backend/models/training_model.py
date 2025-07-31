@@ -8,12 +8,16 @@ from sqlmodel import SQLModel, Field, Relationship
 
 
 class TrainingGround(SQLModel, table=True):
-    """Represents a club's training ground and its upgrade level."""
+    """
+    Represents a club's training ground.
+    Each training ground tier provides an XP boost to player training.
+    """
     id: Optional[int] = Field(default=None, primary_key=True)
-    name: str
-    level: int
+    tier: int  # Training tier (1–4)
+    name: str  # Training ground name
+    xp_boost: int  # XP boost percentage (e.g., 25 = +25% XP)
 
-    # One-to-one relationship with Club
+    # Relationship to Club (one training ground can be used by many clubs)
     club: Optional["Club"] = Relationship(back_populates="training_ground")
 
 

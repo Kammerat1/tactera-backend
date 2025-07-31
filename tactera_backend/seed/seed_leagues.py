@@ -26,12 +26,12 @@ class Country(SQLModel, table=True):
 class League(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
-    tier: int
+    level: int
     group: Optional[int] = Field(default=None)
     country_id: int = Field(foreign_key="country.id")
     country: Optional[Country] = Relationship(back_populates="leagues")
 
-from league_config import league_config
+from tactera_backend.core.league_config import league_config
 
 
 def seed_leagues():
@@ -57,11 +57,11 @@ def seed_leagues():
 
             # Loop through leagues in this country
             for league_data in country_data["leagues"]:
-                tier = league_data["tier"]
+                level = league_data["level"]
 
                 # If league has no divisions (tier 1, single table)
                 if "teams" in league_data:
-                    _add_league_if_missing(session, league_data["name"], tier, country.id)
+                    _add_league_if_missing(session, league_data["name"], level, country.id)
 
                 # If league has multiple divisions (tier 2+)
                 if "divisions" in league_data:
@@ -70,7 +70,7 @@ def seed_leagues():
                         _add_league_if_missing(
                             session,
                             name=league_data["name"],  # base name (e.g., "Division 2")
-                            tier=tier,
+                            level=level,
                             country_id=country.id,
                             group=group_num
                         )
@@ -80,7 +80,7 @@ def seed_leagues():
         print("✅ League seeding complete!")
 
 
-def _add_league_if_missing(session: Session, name: str, tier: int, country_id: int, group: Optional[int] = None):
+def _add_league_if_missing(session: Session, name: str, level: int, country_id: int, group: Optional[int] = None):
     """
     Adds a league if it doesn't already exist in the database.
     """
@@ -98,8 +98,8 @@ def _add_league_if_missing(session: Session, name: str, tier: int, country_id: i
         return
 
     # Create new league
-    print(f"   ➕ Adding new league: {name} (Tier {tier})")
-    league = League(name=name, tier=tier, country_id=country_id, group=group)
+    print(f"   ➕ Adding new league: {name} (level {level})")
+    league = League(name=name, level=level, country_id=country_id, group=group)
     session.add(league)
     session.commit()
 

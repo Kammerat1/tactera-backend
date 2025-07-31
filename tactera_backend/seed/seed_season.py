@@ -1,9 +1,9 @@
 from sqlmodel import Session, select
 from tactera_backend.core.database import engine
-from tactera_backend.models.models import SeasonState
+from tactera_backend.models.season_model import SeasonState
 
 # 🚀 Create the new table if not already present
-from tactera_backend.models.models importSQLModel
+from sqlmodel import SQLModel
 SQLModel.metadata.create_all(engine)
 
 with Session(engine) as session:

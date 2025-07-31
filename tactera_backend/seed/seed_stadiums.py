@@ -3,7 +3,8 @@
 
 from sqlmodel import Session, select
 from tactera_backend.core.database import engine
-from tactera_backend.models.models import Club, Stadium, StadiumPart
+from tactera_backend.models.club_model import Club
+from tactera_backend.models.stadium_model import Stadium, StadiumPart
 
 
 # Define the 5 default parts

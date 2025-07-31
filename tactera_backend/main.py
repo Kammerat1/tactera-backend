@@ -2,12 +2,17 @@ from sqlmodel import SQLModel, Session
 from fastapi import FastAPI
 
 # --- Models ---
-from tactera_backend.models.player_stat_model import PlayerStat
 from tactera_backend.models.club_model import Club
-from tactera_backend.models.training_model import TrainingGround
+from tactera_backend.models.country_model import Country
+from tactera_backend.models.league_model import League
 from tactera_backend.models.manager_model import Manager
-from tactera_backend.models.player_model import Player
 from tactera_backend.models.match_model import Match
+from tactera_backend.models.player_model import Player
+from tactera_backend.models.player_stat_model import PlayerStat
+from tactera_backend.models.season_model import SeasonState
+from tactera_backend.models.stadium_model import Stadium
+from tactera_backend.models.stat_level_requirement_model import StatLevelRequirement
+from tactera_backend.models.training_model import TrainingGround, TrainingHistory, TrainingHistoryStat
 
 # --- Core / Routes / Services ---
 from tactera_backend.core.auth import router as auth_router
@@ -18,6 +23,10 @@ from tactera_backend.seed.seed_xp_levels import safe_seed_stat_levels
 from tactera_backend.routes.league_routes import router as league_router
 from tactera_backend.core.database import init_db, engine
 from tactera_backend.services.training import router as training_router
+
+# --- Seeds ---
+from tactera_backend.seed.seed_traininggrounds import safe_seed_traininggrounds
+
 
 # ✅ Create FastAPI app
 app = FastAPI()
@@ -35,6 +44,10 @@ for model_name in dir(models):
 
 # ✅ Seed XP levels
 safe_seed_stat_levels()
+
+# ✅ Seed Training Grounds
+safe_seed_traininggrounds()
+
 
 # ✅ Include Routers
 app.include_router(auth_router, prefix="/auth", tags=["Auth"])

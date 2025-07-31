@@ -1,5 +1,6 @@
 from sqlmodel import Session, select
-from tactera_backend.models.models import Club, Player
+from tactera_backend.models.club_model import Club
+from tactera_backend.models.player_model import Player
 from tactera_backend.core.database import engine
 import random
 
@@ -60,6 +61,7 @@ def seed_players():
             print(f"✅ Added {PLAYERS_PER_CLUB} players to '{club.name}'")
 
         session.commit()
+        print("✅ Player seeding complete!")
 
 if __name__ == "__main__":
     seed_players()

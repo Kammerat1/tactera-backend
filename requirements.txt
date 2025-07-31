@@ -1,13 +1,32 @@
-fastapi==0.110.0
-uvicorn[standard]==0.29.0
-sqlmodel==0.0.16
-sqlalchemy==2.0.25
-pydantic==2.6.3
-python-jose==3.3.0
-passlib[bcrypt]==1.7.4
-python-multipart==0.0.6
-python-dotenv==1.0.1
-bcrypt==4.3.0
-pytest==8.1.1
-pandas
-openpyxl==3.1.5
+# ============================================
+# Core Framework & Server
+# ============================================
+fastapi==0.110.0        # Web framework for building APIs
+uvicorn[standard]==0.29.0  # ASGI server for running FastAPI
+
+# ============================================
+# Database & ORM
+# ============================================
+sqlmodel==0.0.16        # Combines SQLAlchemy & Pydantic for models
+sqlalchemy==2.0.25      # Core SQL toolkit
+pydantic==2.6.3         # Data validation and schema definition
+
+# ============================================
+# Authentication & Security
+# ============================================
+python-jose==3.3.0      # JWT token handling
+passlib[bcrypt]==1.7.4  # Password hashing utilities
+bcrypt==4.3.0           # Core bcrypt library for hashing
+python-multipart==0.0.6 # File uploads and multipart form data
+python-dotenv==1.0.1    # Load environment variables from .env files
+
+# ============================================
+# Testing
+# ============================================
+pytest==8.1.1           # Test framework
+
+# ============================================
+# Data Handling (Seeding & Utilities)
+# ============================================
+pandas                  # Data manipulation, used for seeding XP levels
+openpyxl==3.1.5         # Excel reader engine required by pandas for seeding

@@ -1,6 +1,7 @@
 from sqlmodel import Session, select, func
 from tactera_backend.core.database import engine
-from tactera_backend.models.models import Club, League
+from tactera_backend.models.club_model import Club
+from tactera_backend.models.league_model import League
 import random
 
 
@@ -11,14 +12,14 @@ def seed_clubs():
         leagues = session.exec(select(League)).all()
 
         for league in leagues:
-            print(f"⚽ Found league: {league.name} (Country ID: {league.country_id}, Tier: {league.tier})")
+            print(f"⚽ Found league: {league.name} (Country ID: {league.country_id}, Tier: {league.level})")
 
             # Count existing clubs in this league
             club_count = session.exec(
                 select(func.count()).select_from(Club).where(Club.league_id == league.id)
             ).one()
 
-            desired_club_count = 16 if league.tier == 1 else 14  # Example: top tier has 16, lower has 14
+            desired_club_count = 16 if league.level == 1 else 14  # Example: top tier has 16, lower has 14
             print(f"   🏟 {club_count}/{desired_club_count} clubs currently in this league")
 
             if club_count < desired_club_count:

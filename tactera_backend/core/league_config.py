@@ -31,12 +31,12 @@ league_config = {
         "leagues": [
             {
                 "name": "Premier League",   # Tier 1
-                "tier": 1,
+                "level": 1,
                 "teams": 16
             },
             {
                 "name": "Division 2",       # Tier 2 (grouped)
-                "tier": 2,
+                "level": 2,
                 "divisions": [
                     {"teams": 16},  # Group 1
                     {"teams": 16},  # Group 2
@@ -50,12 +50,12 @@ league_config = {
         "leagues": [
             {
                 "name": "Superligaen",      # Tier 1
-                "tier": 1,
+                "level": 1,
                 "teams": 14
             },
             {
                 "name": "Division 2",       # Tier 2 (grouped)
-                "tier": 2,
+                "level": 2,
                 "divisions": [
                     {"teams": 14},  # Group 1
                     {"teams": 14},  # Group 2
