@@ -2,22 +2,6 @@ from sqlmodel import SQLModel, Field, Relationship
 from typing import Optional, List
 from pydantic import BaseModel
 from datetime import datetime, date
-
-# ⚽ Match model: represents a scheduled fixture between two clubs in a league
-class Match(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-
-    league_id: int = Field(foreign_key="league.id")  # league the match belongs to
-    home_club_id: int = Field(foreign_key="club.id")  # home team
-    away_club_id: int = Field(foreign_key="club.id")  # away team
-
-    round_number: int  # 1–30
-    season: int  # in-game season number
-    match_time: Optional[datetime] = None  # for future match scheduling
-
-    home_goals: Optional[int] = None  # to be filled when match is simulated
-    away_goals: Optional[int] = None
-    is_played: bool = False  # set to True once match is simulated
     
     # 🗓️ Tracks the current round and season for a given league
 class SeasonState(SQLModel, table=True):
