@@ -26,6 +26,13 @@ app = FastAPI()
 init_db()
 SQLModel.metadata.create_all(engine)
 
+# ✅ Resolve forward references for all models
+from tactera_backend import models
+for model_name in dir(models):
+    model = getattr(models, model_name)
+    if hasattr(model, "update_forward_refs"):
+        model.update_forward_refs()
+
 # ✅ Seed XP levels
 safe_seed_stat_levels()
 
