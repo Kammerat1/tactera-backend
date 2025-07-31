@@ -14,8 +14,8 @@ from tactera_backend.services.match import router as match_router
 from tactera_backend.routes.player_routes import router as player_router
 from tactera_backend.seed.seed_xp_levels import safe_seed_stat_levels
 from tactera_backend.routes.league_routes import router as league_router
-
-
+from tactera_backend.routes.club_routes import router as club_routes
+app.include_router(club_routes, prefix="/clubs", tags=["Clubs"])
 
 
 from tactera_backend.core.database import init_db, engine  # ✅ Add engine import here
