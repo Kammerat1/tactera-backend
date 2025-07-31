@@ -1,15 +1,16 @@
 from sqlmodel import SQLModel, Session
 from fastapi import FastAPI
-from tactera_backend.models.player_stat import PlayerStat
-from tactera_backend.models.models import Club, MatchResult, TrainingGround
-from tactera_backend.models.manager import Manager
-from tactera_backend.models.player import Player
-from tactera_backend.models.models import*  # This ensures Stadium + StadiumPart are included
+from tactera_backend.models.player_stat_model import PlayerStat
+from tactera_backend.models.club_model import Club
+from tactera_backend.models.training_model import TrainingGround
+from tactera_backend.models.manager_model import Manager
+from tactera_backend.models.player_model import Player
+from tactera_backend.models.match_model import Match
 
 
 
 from tactera_backend.core.auth import router as auth_router
-from tactera_backend.models.club import router as club_router
+from tactera_backend.routes.club_routes import router as club_router
 from tactera_backend.services.match import router as match_router
 from tactera_backend.routes.player_routes import router as player_router
 from tactera_backend.seed.seed_xp_levels import safe_seed_stat_levels
