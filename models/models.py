@@ -3,12 +3,6 @@ from typing import Optional, List
 from pydantic import BaseModel
 from datetime import datetime, date
 
-# Country model
-class Country(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    name: str
-    leagues: List[League] = Relationship(back_populates="country")
-
 # MatchResult model
 class MatchResult(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
