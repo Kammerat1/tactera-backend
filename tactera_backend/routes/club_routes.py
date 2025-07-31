@@ -89,53 +89,44 @@ class TrainingRequest(BaseModel):
 # Endpoint to train a club's squad
 @router.post("/{club_id}")
 def train_club(club_id: int, data: TrainingRequest, session: Session = Depends(get_session)):
-
+    """
+    Trains all players in a club using the selected drill.
+    Distributes XP to affected stats and logs training history.
+    """
     print("Training club:", club_id)
 
-    players = session.query(Player).filter_by(club_id=club_id).all()
-    print("Found players:", len(players))
-
-    # Step 1: Fetch the club
+    # ✅ Fetch the club and validate existence
     club = session.get(Club, club_id)
     if not club:
         raise HTTPException(status_code=404, detail="Club not found.")
 
-    # Step 2: Get the club's training ground using its direct reference
+    # ✅ Get training ground by direct reference
     training_ground = session.get(TrainingGround, club.trainingground_id)
     if not training_ground:
         raise HTTPException(status_code=404, detail="Training ground not found.")
-    
-    # ✅ Training cooldown check - WORKING - DEACTIVATED.
-    # if club.last_training_date == date.today():
-    #    raise HTTPException(status_code=400, detail="Training already completed today. Try again tomorrow.")
 
-    # Validate the chosen drill
+    # ✅ Validate chosen drill
     selected_drill = next((d for d in DRILLS if d["name"].lower() == data.drill_name.lower()), None)
-
     if not selected_drill:
         raise HTTPException(status_code=400, detail=f"Invalid drill: {data.drill_name}")
 
     affected_stats = selected_drill["affected_stats"]
 
-
-    # Step 3: Get the squad
-    players = session.exec(
-        select(Player).where(Player.club_id == club_id)
-    ).all()
+    # ✅ Get the squad (single query)
+    players = session.exec(select(Player).where(Player.club_id == club_id)).all()
     if not players:
         raise HTTPException(status_code=400, detail="Squad is empty.")
 
-    # Step 4: Apply training
-    xp_gain = training_ground.xp_boost
     updated_players = []
-    
+
+    # === Apply training ===
     for player in players:
         # Get all PlayerStat rows for this player
         player_stats = session.exec(
             select(PlayerStat).where(PlayerStat.player_id == player.id)
         ).all()
 
-                # === Step 1: Calculate total XP for this player ===
+        # 1️⃣ Calculate total XP for this player
         total_xp = calculate_training_xp(
             potential=player.potential,
             ambition=player.ambition,
@@ -143,14 +134,15 @@ def train_club(club_id: int, data: TrainingRequest, session: Session = Depends(g
             training_ground_boost=training_ground.xp_boost
         )
 
-        # === Step 2: Split XP among affected stats ===
+        # 2️⃣ Split XP among affected stats
         stat_xp_map = split_xp_among_stats(total_xp, affected_stats)
 
-        # === Step 3: Apply split XP to each affected stat ===
+        # 3️⃣ Apply XP to each stat
         delta_map = {}
         for stat_name, xp_gain in stat_xp_map.items():
             stat = next((s for s in player_stats if s.stat_name == stat_name), None)
 
+            # If stat record doesn't exist yet, create it
             if not stat:
                 stat = PlayerStat(
                     player_id=player.id,
@@ -168,60 +160,55 @@ def train_club(club_id: int, data: TrainingRequest, session: Session = Depends(g
             stat.value = get_stat_level(stat.xp, session)
             session.add(stat)
 
-
-        # 📦 After all stats have been updated, prepare return data
-        stat_summary = {}
-        for stat in player_stats:
-            stat_summary[stat.stat_name] = {
+        # Prepare return payload for this player
+        stat_summary = {
+            stat.stat_name: {
                 "value": stat.value,
                 "xp": stat.xp,
                 "delta_xp": delta_map.get(stat.stat_name, 0)
             }
+            for stat in player_stats
+        }
+
         updated_players.append({
             "player_id": player.id,
             "name": player.name,
             "total_xp_earned": int(total_xp),
             "stats": stat_summary
-            })
+        })
 
-    # ✅ Update last training date on success
+    # ✅ Update last training date
     club.last_training_date = date.today()
     session.add(club)
 
-    # 1️⃣ Create main history record
+    # 1️⃣ Log main training history record
     history = TrainingHistory(
         club_id=club.id,
         drill_name=selected_drill["name"],
-        total_xp=sum([p["total_xp_earned"] for p in updated_players])
+        total_xp=sum(p["total_xp_earned"] for p in updated_players)
     )
     session.add(history)
-    session.commit()  # Commit so history gets an ID
+    session.commit()  # Commit so history ID is available
 
-    # 2️⃣ Add detailed per-player stat logs
+    # 2️⃣ Log per-player stat updates
     for player_data in updated_players:
-        player_id = player_data["player_id"]
         for stat_name, stat_info in player_data["stats"].items():
-            stat_history = TrainingHistoryStat(
+            session.add(TrainingHistoryStat(
                 history_id=history.id,
-                player_id=player_id,
+                player_id=player_data["player_id"],
                 stat_name=stat_name,
                 xp_gained=stat_info["delta_xp"],
                 new_value=stat_info["value"]
-            )
-            session.add(stat_history)
+            ))
 
-
-
-        
-
-    # Step 5: Save changes and return
     session.commit()
 
-    # NEEDS UPDATE
+    # ✅ Fixed return payload: total XP is sum of all players' XP
     return {
-        "total_xp_earned": xp_gain,
+        "total_xp_earned": sum(p["total_xp_earned"] for p in updated_players),
         "players_trained": updated_players
     }
+
 
 # GET TRAINING DRILLS ENDPOINT
 
