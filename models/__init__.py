@@ -4,3 +4,4 @@ from .club import Club
 from .league import League
 from .training_models import TrainingGround, TrainingHistory, TrainingHistoryStat
 from .match_models import Match
+from .season_models import SeasonState
