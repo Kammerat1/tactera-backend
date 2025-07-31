@@ -6,3 +6,4 @@ from .training_models import TrainingGround, TrainingHistory, TrainingHistorySta
 from .match_models import Match, MatchResult
 from .season_models import SeasonState
 from .country_models import Country
+from .stadium_models import Stadium, StadiumPart
