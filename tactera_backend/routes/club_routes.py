@@ -12,6 +12,7 @@ from tactera_backend.models.player_stat_model import PlayerStat, get_stat_level
 from tactera_backend.services.training import calculate_training_xp, split_xp_among_stats, DRILLS
 from datetime import datetime, date
 from pydantic import BaseModel
+from tactera_backend.core.config import TEST_MODE  # Import TEST_MODE for cooldown logic
 import random
 
 
@@ -104,6 +105,23 @@ def train_club(club_id: int, data: TrainingRequest, session: Session = Depends(g
     training_ground = session.get(TrainingGround, club.trainingground_id)
     if not training_ground:
         raise HTTPException(status_code=404, detail="Training ground not found.")
+    
+        # ============================
+    # DAILY TRAINING COOLDOWN CHECK
+    # ============================
+    from tactera_backend.core.config import TEST_MODE
+    if not TEST_MODE:
+        today = date.today()
+        existing_session = (
+            session.query(TrainingHistory)
+            .filter(TrainingHistory.club_id == club_id)
+            .filter(TrainingHistory.training_date == today)
+            .first()
+        )
+        if existing_session:
+            return {"message": "Training cooldown active. This club has already trained today."}
+    else:
+        print("⚠ TEST_MODE active: Skipping training cooldown.")
 
     # ✅ Validate chosen drill
     selected_drill = next((d for d in DRILLS if d["name"].lower() == data.drill_name.lower()), None)
@@ -308,15 +326,13 @@ def get_latest_training_session(
     """
     Retrieve the LATEST training session for a given club.
     - Returns only the most recent training session.
-    - Includes drill name, date, total XP, and per-player stat details.
+    - Includes drill name, date, total XP, and per-player stat details (with stat names).
     """
 
-    # Import models inside function to avoid circular imports
     from tactera_backend.models.training_model import TrainingHistory, TrainingHistoryStat
     from tactera_backend.models.player_model import Player
-    from tactera_backend.models.player_stat_model import PlayerStat
 
-    # Query: get the most recent training history record for this club
+    # Get the most recent training session for this club
     latest_training = (
         session.query(TrainingHistory)
         .filter(TrainingHistory.club_id == club_id)
@@ -324,26 +340,23 @@ def get_latest_training_session(
         .first()
     )
 
-    # If no training history exists, return a clear message
     if not latest_training:
         return {"message": "No training history found for this club."}
 
-    # Fetch all related stat improvements for this training session
+    # Fetch all player XP gains (including stat names)
     stats = (
-        session.query(TrainingHistoryStat, Player, PlayerStat)
+        session.query(TrainingHistoryStat, Player)
         .join(Player, TrainingHistoryStat.player_id == Player.id)
-        .join(PlayerStat, TrainingHistoryStat.stat_id == PlayerStat.id)
         .filter(TrainingHistoryStat.training_history_id == latest_training.id)
         .all()
     )
 
-    # Structure the response
     players_data = []
-    for stat_entry, player, stat in stats:
+    for stat_entry, player in stats:
         players_data.append({
             "player_id": player.id,
             "player_name": player.name,
-            "stat_name": stat.name,
+            "stat_name": stat_entry.stat_name,  # ✅ Now included
             "xp_gained": stat_entry.xp_gained,
             "new_value": stat_entry.new_value,
         })
@@ -355,4 +368,3 @@ def get_latest_training_session(
         "total_xp": latest_training.total_xp,
         "players": players_data,
     }
-
