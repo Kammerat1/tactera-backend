@@ -296,4 +296,63 @@ def get_training_history(
         "history": result
     }
 
+# ===============================
+# LATEST TRAINING SESSION ENDPOINT
+# ===============================
+
+@router.get("/clubs/{club_id}/training/history/latest")
+def get_latest_training_session(
+    club_id: int,
+    session: Session = Depends(get_session),
+):
+    """
+    Retrieve the LATEST training session for a given club.
+    - Returns only the most recent training session.
+    - Includes drill name, date, total XP, and per-player stat details.
+    """
+
+    # Import models inside function to avoid circular imports
+    from tactera_backend.models.training_model import TrainingHistory, TrainingHistoryStat
+    from tactera_backend.models.player_model import Player
+    from tactera_backend.models.player_stat_model import PlayerStat
+
+    # Query: get the most recent training history record for this club
+    latest_training = (
+        session.query(TrainingHistory)
+        .filter(TrainingHistory.club_id == club_id)
+        .order_by(TrainingHistory.training_date.desc(), TrainingHistory.id.desc())
+        .first()
+    )
+
+    # If no training history exists, return a clear message
+    if not latest_training:
+        return {"message": "No training history found for this club."}
+
+    # Fetch all related stat improvements for this training session
+    stats = (
+        session.query(TrainingHistoryStat, Player, PlayerStat)
+        .join(Player, TrainingHistoryStat.player_id == Player.id)
+        .join(PlayerStat, TrainingHistoryStat.stat_id == PlayerStat.id)
+        .filter(TrainingHistoryStat.training_history_id == latest_training.id)
+        .all()
+    )
+
+    # Structure the response
+    players_data = []
+    for stat_entry, player, stat in stats:
+        players_data.append({
+            "player_id": player.id,
+            "player_name": player.name,
+            "stat_name": stat.name,
+            "xp_gained": stat_entry.xp_gained,
+            "new_value": stat_entry.new_value,
+        })
+
+    return {
+        "id": latest_training.id,
+        "training_date": latest_training.training_date,
+        "drill_name": latest_training.drill_name,
+        "total_xp": latest_training.total_xp,
+        "players": players_data,
+    }
 
