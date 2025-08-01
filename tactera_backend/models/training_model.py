@@ -24,10 +24,13 @@ class TrainingGround(SQLModel, table=True):
 class TrainingHistory(SQLModel, table=True):
     """Tracks each training session for a club."""
     id: Optional[int] = Field(default=None, primary_key=True)
-    date: date
+    training_date: date = Field(default_factory=date.today)
 
     club_id: int = Field(foreign_key="club.id")
     club: "Club" = Relationship()
+    
+    drill_name: str  # ✅ Added field to store which drill was used
+    total_xp: int    # ✅ Added field to store total XP from session
 
     # Training session logs for each player
     players: List["TrainingHistoryStat"] = Relationship(back_populates="training_history")
@@ -43,3 +46,4 @@ class TrainingHistoryStat(SQLModel, table=True):
     player_id: int = Field(foreign_key="player.id")
     stat_name: str
     xp_gained: int
+    new_value: int  # ✅ Added: final stat value after training

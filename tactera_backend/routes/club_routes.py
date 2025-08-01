@@ -151,7 +151,7 @@ def train_club(club_id: int, data: TrainingRequest, session: Session = Depends(g
                     xp=0
                 )
                 session.add(stat)
-                session.commit()
+                session.flush()  # Ensure stat has an ID before updating
                 session.refresh(stat)
                 player_stats.append(stat)
 
@@ -188,13 +188,13 @@ def train_club(club_id: int, data: TrainingRequest, session: Session = Depends(g
         total_xp=sum(p["total_xp_earned"] for p in updated_players)
     )
     session.add(history)
-    session.commit()  # Commit so history ID is available
+    session.flush()  # ✅ Now history.id is available
 
     # 2️⃣ Log per-player stat updates
     for player_data in updated_players:
         for stat_name, stat_info in player_data["stats"].items():
             session.add(TrainingHistoryStat(
-                history_id=history.id,
+                training_history_id=history.id,
                 player_id=player_data["player_id"],
                 stat_name=stat_name,
                 xp_gained=stat_info["delta_xp"],
@@ -224,45 +224,46 @@ def get_training_drills():
 def get_training_history(
     club_id: int,
     session: Session = Depends(get_session),
-    page: int = 1,            # ✅ Optional page number (default 1)
-    limit: int = 600          # ✅ Default limit stays 600
+    page: int = 1,         # ✅ Page number for pagination
+    limit: int = 50        # ✅ Default to 50 (you can adjust during testing)
 ):
     """
-    Returns paginated training history for a club.
-    - Default: last 600 sessions (page=1, limit=600)
-    - Supports pagination: ?page=2&limit=50
+    Returns paginated training history for a club, ordered by newest session first.
+    Each record includes drill, date, total XP, and detailed per-player stat updates.
     """
+
     # 1️⃣ Validate club
     club = session.get(Club, club_id)
     if not club:
         raise HTTPException(status_code=404, detail="Club not found.")
 
-    # 1.1 Count total training sessions for this club
+    # 2️⃣ Count total sessions for pagination metadata
     total_count = session.exec(
         select(TrainingHistory).where(TrainingHistory.club_id == club_id)
     ).all()
-
     total_count = len(total_count)
 
-
-    # 2️⃣ Calculate offset for pagination
+    # 3️⃣ Calculate pagination offset
     offset = (page - 1) * limit
 
-    # 3️⃣ Fetch paginated sessions
+    # 4️⃣ Fetch ordered and paginated sessions
     history_records = session.exec(
         select(TrainingHistory)
         .where(TrainingHistory.club_id == club_id)
-        .order_by(TrainingHistory.date.desc())
-        .offset(offset)        # ✅ Skip previous pages
-        .limit(limit)          # ✅ Fetch only this page
+        .order_by(TrainingHistory.training_date.desc(), TrainingHistory.id.desc())  # ✅ Fix ordering
+        .offset(offset)
+        .limit(limit)
     ).all()
 
+    # 5️⃣ Build response
     result = []
     for history in history_records:
+        # Fetch all stat updates linked to this session
         stat_entries = session.exec(
-            select(TrainingHistoryStat).where(TrainingHistoryStat.history_id == history.id)
+            select(TrainingHistoryStat).where(TrainingHistoryStat.training_history_id == history.id)
         ).all()
 
+        # Group stats per player
         player_stats = {}
         for stat in stat_entries:
             if stat.player_id not in player_stats:
@@ -274,17 +275,25 @@ def get_training_history(
             })
 
         result.append({
-            "date": history.date,
+            "training_id": history.id,
+            "training_date": history.training_date,
             "drill_name": history.drill_name,
             "total_xp": history.total_xp,
-            "player_stats": player_stats
+            "players": [
+                {
+                    "player_id": pid,
+                    "stats": stats
+                }
+                for pid, stats in player_stats.items()
+            ]
         })
 
     return {
         "club_id": club_id,
         "page": page,
         "limit": limit,
-        "total_count": total_count,
+        "total_sessions": total_count,
         "history": result
     }
+
 
