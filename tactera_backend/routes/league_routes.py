@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 from tactera_backend.core.database import get_session
 from tactera_backend.models.league_model import League
@@ -52,45 +52,84 @@ def get_fixtures(league_id: int, session: Session = Depends(get_session)):
 # =========================================
 # GET LEAGUE STANDINGS
 # =========================================
-@router.get("/{league_id}/standings")
+@router.get("/standings/{league_id}")
 def get_standings(league_id: int, session: Session = Depends(get_session)):
     """
-    Fetch league standings for the active season.
+    Calculate and return current standings for a league's active season.
     """
-    league = session.get(League, league_id)
-    if not league:
-        return {"error": "League not found."}
-
+    # 1. Find the active season state for this league
     season_state = session.exec(
         select(SeasonState)
-        .join(Season, Season.id == SeasonState.season_id)
-        .where(Season.league_id == league_id)
+        .where(SeasonState.season_id.in_(
+            select(Season.id).where(Season.league_id == league_id)
+        ))
     ).first()
 
     if not season_state:
-        return {"error": "No active season found for this league."}
+        raise HTTPException(status_code=404, detail="Active season not found for this league.")
 
-    season = session.get(Season, season_state.season_id)
+    active_season_id = season_state.season_id
 
-    # Fetch clubs in this league
+    # 2. Fetch all clubs in this league
     clubs = session.exec(select(Club).where(Club.league_id == league_id)).all()
 
-    # Fetch matches that have been played
+    standings = {club.id: {
+        "club_id": club.id,
+        "club_name": club.name,
+        "points": 0,
+        "wins": 0,
+        "draws": 0,
+        "losses": 0,
+        "goals_for": 0,
+        "goals_against": 0,
+        "goal_diff": 0
+    } for club in clubs}
+
+    # 3. Fetch all played matches in this season
     matches = session.exec(
-        select(Match)
-        .where(
+        select(Match).where(
             Match.league_id == league_id,
-            Match.season_id == season.id,
+            Match.season_id == active_season_id,
             Match.is_played == True
         )
     ).all()
 
-    # TODO: Add standings calculation (points, GD, etc.)
-    return {
-        "league": league.name,
-        "season_number": season.season_number,
-        "standings": [],  # Placeholder until calculation is implemented
-    }
+    # 4. Calculate standings
+    for match in matches:
+        home = standings[match.home_club_id]
+        away = standings[match.away_club_id]
+
+        home["goals_for"] += match.home_goals
+        home["goals_against"] += match.away_goals
+        away["goals_for"] += match.away_goals
+        away["goals_against"] += match.home_goals
+
+        if match.home_goals > match.away_goals:
+            home["wins"] += 1
+            home["points"] += 3
+            away["losses"] += 1
+        elif match.home_goals < match.away_goals:
+            away["wins"] += 1
+            away["points"] += 3
+            home["losses"] += 1
+        else:
+            home["draws"] += 1
+            away["draws"] += 1
+            home["points"] += 1
+            away["points"] += 1
+
+    # 5. Compute GD and sort
+    for club_stats in standings.values():
+        club_stats["goal_diff"] = club_stats["goals_for"] - club_stats["goals_against"]
+
+    sorted_standings = sorted(
+        standings.values(),
+        key=lambda x: (x["points"], x["goal_diff"], x["goals_for"]),
+        reverse=True
+    )
+
+    return sorted_standings
+
 
 # =========================================
 # ADVANCE ROUND MANUALLY
