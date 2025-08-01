@@ -1,4 +1,4 @@
-from sqlmodel import SQLModel, Session
+from sqlmodel import SQLModel, Session, select
 from fastapi import FastAPI
 
 # --- Models ---
@@ -19,14 +19,12 @@ from tactera_backend.core.auth import router as auth_router
 from tactera_backend.routes.club_routes import router as club_router
 from tactera_backend.services.match import router as match_router
 from tactera_backend.routes.player_routes import router as player_router
-from tactera_backend.seed.seed_xp_levels import safe_seed_stat_levels
 from tactera_backend.routes.league_routes import router as league_router
 from tactera_backend.core.database import init_db, engine
 from tactera_backend.services.training import router as training_router
 
 # --- Seeds ---
-from tactera_backend.seed.seed_traininggrounds import safe_seed_traininggrounds
-
+from tactera_backend.seed.seed_all import seed_all  # ✅ Use unified seeding script
 
 # ✅ Create FastAPI app
 app = FastAPI()
@@ -42,12 +40,18 @@ for model_name in dir(models):
     if hasattr(model, "update_forward_refs"):
         model.update_forward_refs()
 
-# ✅ Seed XP levels
-safe_seed_stat_levels()
+# ✅ AUTO-SEED LOGIC (new)
+AUTO_SEED_ON_START = True  # Toggle for development/production
 
-# ✅ Seed Training Grounds
-safe_seed_traininggrounds()
-
+if AUTO_SEED_ON_START:
+    from sqlmodel import Session
+    with Session(engine) as session:
+        league_count = len(session.exec(select(League)).all())
+        if league_count == 0:
+            print("🌱 No leagues found. Auto-seeding database...")
+            seed_all()
+        else:
+            print("✅ Database already seeded. Skipping auto-seed.")
 
 # ✅ Include Routers
 app.include_router(auth_router, prefix="/auth", tags=["Auth"])

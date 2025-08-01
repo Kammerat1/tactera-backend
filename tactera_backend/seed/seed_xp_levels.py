@@ -1,24 +1,39 @@
-from tactera_backend.core.database import get_sync_session
+# seed_xp_levels.py
+# Seeds XP level requirements into StatLevelRequirement model.
+
+from sqlmodel import Session
+from tactera_backend.core.database import engine
 from tactera_backend.models.stat_level_requirement_model import StatLevelRequirement
-import pandas as pd
-import os
 
-def safe_seed_stat_levels():
-    session = get_sync_session()
-    count = session.query(StatLevelRequirement).count()
-    if count > 0:
-        print("✅ Stat level requirements already seeded.")
-        return
+def seed_xp_levels():
+    """
+    Seeds XP requirements for each stat level using StatLevelRequirement.
+    Level 1 starts at 0 XP, levels 2–10 increase by 50 XP each,
+    and levels beyond 10 increase gradually.
+    """
 
-    # Resolve Excel path relative to project root
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    file_path = os.path.join(base_dir, "xp_levels.xlsx")
+    print("Seeding XP level requirements...")
 
-    df = pd.read_excel(file_path)
-    for _, row in df.iterrows():
-        level = int(row["Level"])
-        xp = int(row["Accumulated xp"])
-        session.add(StatLevelRequirement(level=level, xp_required=xp))
+    xp_levels = []
+    base_xp = 0
 
-    session.commit()
-    print("✅ Stat level requirements seeded successfully.")
+    # Levels 1–10: +50 XP per level
+    for level in range(1, 11):
+        xp_levels.append((level, base_xp))
+        base_xp += 50
+
+    # Levels 11–50: Incremental scaling
+    for level in range(11, 51):
+        xp_levels.append((level, base_xp))
+        base_xp += 50 + (level - 10)  # Slight scaling increase
+
+    with Session(engine) as session:
+        for level, xp in xp_levels:
+            existing = session.get(StatLevelRequirement, level)
+            if existing:
+                continue
+            session.add(StatLevelRequirement(level=level, xp_required=xp))
+
+        session.commit()
+
+    print("✅ XP level requirements seeded successfully.")

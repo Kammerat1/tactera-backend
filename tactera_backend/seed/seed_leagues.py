@@ -16,20 +16,9 @@ from tactera_backend.core.database import engine
 # Import only what's needed for seeding to avoid triggering PlayerStat
 from sqlmodel import SQLModel, Field, Relationship
 from typing import Optional, List
+from tactera_backend.models.country_model import Country
+from tactera_backend.models.league_model import League
 
-# Local league models for seeding only (matches DB schema exactly)
-class Country(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    name: str
-    leagues: List["League"] = Relationship(back_populates="country")
-
-class League(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    name: str
-    level: int
-    group: Optional[int] = Field(default=None)
-    country_id: int = Field(foreign_key="country.id")
-    country: Optional[Country] = Relationship(back_populates="leagues")
 
 from tactera_backend.core.league_config import league_config
 
