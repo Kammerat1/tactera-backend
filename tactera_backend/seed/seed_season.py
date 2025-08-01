@@ -1,25 +1,66 @@
+# seed_season.py
+# Seeds initial seasons for all leagues in the database.
+
+from datetime import datetime, timedelta
 from sqlmodel import Session, select
 from tactera_backend.core.database import engine
-from tactera_backend.models.season_model import SeasonState
+from tactera_backend.models.league_model import League
+from tactera_backend.models.season_model import Season, SeasonState
 
-# 🚀 Create the new table if not already present
-from sqlmodel import SQLModel
-SQLModel.metadata.create_all(engine)
+def seed_seasons():
+    """
+    Seeds a Season and SeasonState for every league in the database.
+    Each league starts at Season 1, beginning on the next Monday (UTC).
+    """
 
-with Session(engine) as session:
-    # Check if already seeded
-    existing = session.exec(
-        select(SeasonState).where(SeasonState.league_id == 1)
-    ).first()
+    print("Seeding seasons...")
 
-    if existing:
-        print("🔁 SeasonState already exists.")
-    else:
-        season = SeasonState(
-            league_id=1,
-            current_season=1,
-            current_round=1,
-        )
-        session.add(season)
-        session.commit()
-        print("✅ Seeded initial SeasonState.")
+    # Open database session
+    with Session(engine) as session:
+        # Fetch all leagues from DB
+        leagues = session.exec(select(League)).all()
+
+        if not leagues:
+            print("⚠️ No leagues found. Run seed_leagues.py first.")
+            return
+
+        for league in leagues:
+            # Check if this league already has a season
+            existing_season = session.exec(
+                select(Season).where(Season.league_id == league.id)
+            ).first()
+
+            if existing_season:
+                print(f"✅ Season already exists for league: {league.name}")
+                continue
+
+            # Calculate season start (always a Monday)
+            today = datetime.utcnow()
+            days_until_monday = (7 - today.weekday()) % 7  # 0 if today is Monday
+            season_start = today + timedelta(days=days_until_monday)
+            season_start = season_start.replace(hour=0, minute=0, second=0, microsecond=0)
+            season_end = season_start + timedelta(days=28)
+
+            # Create new Season entry
+            new_season = Season(
+                league_id=league.id,
+                season_number=1,
+                start_date=season_start,
+                end_date=season_end
+            )
+            session.add(new_season)
+            session.commit()
+            session.refresh(new_season)
+
+            # Create SeasonState linked to this Season
+            season_state = SeasonState(
+                season_id=new_season.id,
+                current_round=1,
+                last_round_advanced=None
+            )
+            session.add(season_state)
+            session.commit()
+
+            print(f"✅ Created Season 1 for {league.name} (Start: {season_start.date()}, End: {season_end.date()})")
+
+    print("🎉 Season seeding complete!")
