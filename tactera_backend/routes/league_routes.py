@@ -6,6 +6,8 @@ from tactera_backend.models.club_model import Club
 from tactera_backend.models.match_model import Match
 from tactera_backend.models.season_model import Season, SeasonState
 from tactera_backend.services.generate_fixtures import generate_fixtures_for_league
+from tactera_backend.core.database import get_db
+from tactera_backend.core.match_sim import simulate_match
 
 router = APIRouter()
 
@@ -170,3 +172,16 @@ def generate_fixtures_endpoint(league_id: int, session: Session = Depends(get_se
         return {"error": str(e)}
     except Exception as e:
         return {"error": f"Unexpected error: {str(e)}"}
+
+@router.post("/simulate-match/{fixture_id}")
+async def simulate_match_endpoint(fixture_id: int, db: Session = Depends(get_db)):
+    """
+    Simulates a single match by fixture ID.
+    - Calls the basic match simulator.
+    - Returns the result (goals + fixture info).
+    """
+    result = await simulate_match(db, fixture_id)
+    return {
+        "message": "Match simulated successfully",
+        "result": result
+    }
