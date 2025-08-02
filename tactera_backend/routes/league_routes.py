@@ -185,3 +185,49 @@ async def simulate_match_endpoint(fixture_id: int, db: Session = Depends(get_db)
         "message": "Match simulated successfully",
         "result": result
     }
+
+@router.post("/{league_id}/simulate-round")
+async def simulate_round_endpoint(league_id: int, db: Session = Depends(get_db)):
+    """
+    Simulate all matches in the current round for a given league.
+    - Finds the league's active season and current round.
+    - Fetches all unplayed fixtures in that round.
+    - Simulates each match using the existing simulate_match function.
+    - Returns a summary of results.
+    """
+    # 1. Fetch the active season state for this league
+    season_state = db.exec(
+        select(SeasonState)
+        .join(Season, Season.id == SeasonState.season_id)
+        .where(Season.league_id == league_id)
+    ).first()
+
+    if not season_state:
+        raise HTTPException(status_code=404, detail="No active season state found for this league.")
+
+    current_round = season_state.current_round
+
+    # 2. Fetch all unplayed matches in this round
+    matches = db.exec(
+        select(Match)
+        .where(
+            Match.league_id == league_id,
+            Match.season_id == season_state.season_id,
+            Match.round_number == current_round,
+            Match.is_played == False
+        )
+    ).all()
+
+    if not matches:
+        return {"message": f"No unplayed fixtures found in round {current_round} for league {league_id}."}
+
+    # 3. Simulate each match
+    results = []
+    for match in matches:
+        result = await simulate_match(db, match.id)
+        results.append(result)
+
+    return {
+        "message": f"✅ Simulated {len(results)} matches for round {current_round} in league {league_id}.",
+        "results": results
+    }
