@@ -3,7 +3,7 @@
 
 from datetime import datetime, timedelta
 from sqlmodel import Session, select
-from tactera_backend.core.database import engine
+from tactera_backend.core.database import sync_engine
 from tactera_backend.models.league_model import League
 from tactera_backend.models.season_model import Season, SeasonState
 
@@ -16,7 +16,7 @@ def seed_seasons():
     print("Seeding seasons...")
 
     # Open database session
-    with Session(engine) as session:
+    with Session(sync_engine) as session:
         # Fetch all leagues from DB
         leagues = session.exec(select(League)).all()
 

@@ -2,7 +2,7 @@
 # Seeds XP level requirements into StatLevelRequirement model.
 
 from sqlmodel import Session
-from tactera_backend.core.database import engine
+from tactera_backend.core.database import sync_engine
 from tactera_backend.models.stat_level_requirement_model import StatLevelRequirement
 
 def seed_xp_levels():
@@ -27,7 +27,7 @@ def seed_xp_levels():
         xp_levels.append((level, base_xp))
         base_xp += 50 + (level - 10)  # Slight scaling increase
 
-    with Session(engine) as session:
+    with Session(sync_engine) as session:
         for level, xp in xp_levels:
             existing = session.get(StatLevelRequirement, level)
             if existing:

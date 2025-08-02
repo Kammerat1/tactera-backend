@@ -2,7 +2,7 @@
 # ✅ This script creates one stadium per club and adds 5 default parts to each stadium
 
 from sqlmodel import Session, select
-from tactera_backend.core.database import engine
+from tactera_backend.core.database import sync_engine
 from tactera_backend.models.club_model import Club
 from tactera_backend.models.stadium_model import Stadium, StadiumPart
 
@@ -11,7 +11,7 @@ from tactera_backend.models.stadium_model import Stadium, StadiumPart
 PART_TYPES = ["stand_home", "stand_away", "stand_north", "stand_south", "pitch"]
 
 def seed_stadiums():
-    with Session(engine) as session:
+    with Session(sync_engine) as session:
         clubs = session.exec(select(Club)).all()
 
         for club in clubs:

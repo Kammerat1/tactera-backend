@@ -12,7 +12,7 @@ from tactera_backend.seed.seed_season import seed_seasons
 from tactera_backend.services.generate_fixtures import generate_fixtures_for_league
 
 from sqlmodel import Session
-from tactera_backend.core.database import engine
+from tactera_backend.core.database import sync_engine
 from tactera_backend.models.league_model import League
 
 def seed_all():
@@ -43,7 +43,7 @@ def seed_all():
     seed_seasons()
 
     print("➡️  Step 9: Generating fixtures for all leagues...")
-    with Session(engine) as session:
+    with Session(sync_engine) as session:
         leagues = session.query(League).all()
         for league in leagues:
             print(f"   ⚽ Generating fixtures for {league.name}...")

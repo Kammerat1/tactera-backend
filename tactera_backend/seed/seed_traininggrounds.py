@@ -2,7 +2,7 @@
 # This script seeds the TrainingGround table with 10 fixed entries.
 
 from sqlmodel import Session, select
-from tactera_backend.core.database import engine
+from tactera_backend.core.database import sync_engine
 from tactera_backend.models.training_model import TrainingGround
 
 def seed_traininggrounds():
@@ -22,7 +22,7 @@ def seed_traininggrounds():
         {"id": 10, "tier": 4, "name": "World-Class Center", "xp_boost": 100},
     ]
 
-    with Session(engine) as session:
+    with Session(sync_engine) as session:
         # Check if the table already has data
         existing = session.exec(select(TrainingGround)).all()
         if existing:

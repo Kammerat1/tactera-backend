@@ -1,5 +1,5 @@
 from sqlmodel import Session, select, func
-from tactera_backend.core.database import engine
+from tactera_backend.core.database import sync_engine
 from tactera_backend.models.club_model import Club
 from tactera_backend.models.league_model import League
 from tactera_backend.models.training_model import TrainingGround
@@ -9,7 +9,7 @@ import random
 def seed_clubs():
     print("🏟 Starting club seeding...")
 
-    with Session(engine) as session:
+    with Session(sync_engine) as session:
         leagues = session.exec(select(League)).all()
 
         for league in leagues:

@@ -168,12 +168,11 @@ async def advance_round(league_id: int, db: AsyncSession = Depends(get_db)):
 async def simulate_round_endpoint(league_id: int, db: AsyncSession = Depends(get_db)):
     """
     Simulate all matches in the current round for a given league.
-    - Finds the league's active season and current round.
-    - Fetches all unplayed fixtures in that round.
-    - Simulates each match using the existing simulate_match function.
-    - Automatically advances the round after simulation.
+    - Simulates all fixtures in the current round.
+    - Automatically advances the round afterward.
+    - Prevents advancing beyond the final round.
     """
-    # 1. Fetch the active season state for this league
+    # 1. Fetch the active season state
     result = await db.execute(
         select(SeasonState)
         .join(Season, Season.id == SeasonState.season_id)
@@ -186,7 +185,23 @@ async def simulate_round_endpoint(league_id: int, db: AsyncSession = Depends(get
 
     current_round = season_state.current_round
 
-    # 2. Fetch all unplayed matches in this round
+    # 2. Calculate the final round (teams play each other twice)
+    league_result = await db.execute(select(League).where(League.id == league_id))
+    league = league_result.scalar_one_or_none()
+
+    if not league:
+        raise HTTPException(status_code=404, detail="League not found.")
+
+    club_result = await db.execute(select(Club).where(Club.league_id == league_id))
+    clubs = club_result.scalars().all()
+    num_clubs = len(clubs)
+    final_round = (num_clubs - 1) * 2  # double round robin
+
+    # 3. Check if season already completed
+    if current_round > final_round:
+        return {"message": f"Season already completed. Final round was {final_round}."}
+
+    # 4. Fetch unplayed matches for current round
     result = await db.execute(
         select(Match)
         .where(
@@ -201,21 +216,25 @@ async def simulate_round_endpoint(league_id: int, db: AsyncSession = Depends(get
     if not matches:
         return {"message": f"No unplayed fixtures found in round {current_round} for league {league_id}."}
 
-    # 3. Simulate each match
+    # 5. Simulate matches
     results = []
     for match in matches:
         result = await simulate_match(db, match.id)
         results.append(result)
 
-    # 4. Automatically advance to next round
-    season_state.current_round += 1
-    db.add(season_state)
-    await db.commit()
+    # 6. Advance round or mark season completed
+    if season_state.current_round < final_round:
+        season_state.current_round += 1
+        db.add(season_state)
+        await db.commit()
+        round_message = f"Advanced to round {season_state.current_round}."
+    else:
+        season_state.is_completed = True  # ✅ Mark season as completed
+        db.add(season_state)
+        await db.commit()
+        round_message = f"Season completed at round {final_round}."
 
-    return {
-        "message": f"✅ Simulated {len(results)} matches for round {current_round} and advanced to round {season_state.current_round} in league {league_id}.",
-        "results": results
-    }
+
 
 
 @router.post("/simulate-match/{fixture_id}")

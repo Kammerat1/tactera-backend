@@ -44,19 +44,10 @@ class Season(SQLModel, table=True):
             self.end_date = self.start_date + timedelta(days=28)
 
 
+from sqlmodel import Field
+
 class SeasonState(SQLModel, table=True):
-    """
-    Tracks the current (active) season state for a league.
-    Points to a specific Season and tracks the live round progress.
-    """
-    id: Optional[int] = Field(default=None, primary_key=True)
-
-    # Link to the active season
+    id: int | None = Field(default=None, primary_key=True)
     season_id: int = Field(foreign_key="season.id")
-
-    # Current round progress
-    current_round: int = 1
-
-    # Timestamp of last round advancement
-    last_round_advanced: Optional[datetime] = None
-
+    current_round: int = Field(default=1)
+    is_completed: bool = Field(default=False)  # ✅ NEW FLAG

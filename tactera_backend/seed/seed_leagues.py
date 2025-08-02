@@ -12,7 +12,7 @@ Usage:
 """
 
 from sqlmodel import Session, select
-from tactera_backend.core.database import engine
+from tactera_backend.core.database import sync_engine
 # Import only what's needed for seeding to avoid triggering PlayerStat
 from sqlmodel import SQLModel, Field, Relationship
 from typing import Optional, List
@@ -24,7 +24,7 @@ from tactera_backend.core.league_config import league_config
 
 
 def seed_leagues():
-    with Session(engine) as session:
+    with Session(sync_engine) as session:
         print("🌍 Starting league seeding...")
 
         # Loop through countries in league_config

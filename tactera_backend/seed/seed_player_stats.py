@@ -1,7 +1,7 @@
 from sqlmodel import Session, select, SQLModel
 from tactera_backend.models.player_model import Player
 from tactera_backend.models.player_stat_model import PlayerStat
-from tactera_backend.core.database import engine
+from tactera_backend.core.database import sync_engine
 import random
 
 # 🧠 List of stats each player should have
@@ -21,7 +21,7 @@ STAT_NAMES = [
 
 
 def seed_player_stats():
-    with Session(engine) as session:
+    with Session(sync_engine) as session:
         players = session.exec(select(Player)).all()
 
         for player in players:

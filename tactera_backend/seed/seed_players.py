@@ -1,7 +1,7 @@
 from sqlmodel import Session, select
 from tactera_backend.models.club_model import Club
 from tactera_backend.models.player_model import Player
-from tactera_backend.core.database import engine
+from tactera_backend.core.database import sync_engine
 import random
 
 PLAYERS_PER_CLUB = 18
@@ -42,7 +42,7 @@ def generate_random_player(index: int, club_id: int) -> Player:
     )
 
 def seed_players():
-    with Session(engine) as session:
+    with Session(sync_engine) as session:
         clubs = session.exec(select(Club)).all()
 
         for club in clubs:
