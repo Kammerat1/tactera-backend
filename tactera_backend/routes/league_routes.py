@@ -139,41 +139,84 @@ def get_standings(league_id: int, session: Session = Depends(get_session)):
 # ADVANCE ROUND MANUALLY
 # =========================================
 @router.post("/{league_id}/advance-round")
-def advance_round(league_id: int, session: Session = Depends(get_session)):
+async def advance_round(league_id: int, db: AsyncSession = Depends(get_db)):
     """
-    Advances the current round for the active season of a league.
+    Advances the current round for the active season of a league (async version).
     """
-    state = session.exec(
+    # 1. Fetch the active season state for this league
+    result = await db.execute(
         select(SeasonState)
         .join(Season, Season.id == SeasonState.season_id)
         .where(Season.league_id == league_id)
-    ).first()
+    )
+    state = result.scalar_one_or_none()
 
     if not state:
-        return {"error": "No active season state found for this league."}
+        raise HTTPException(status_code=404, detail="No active season state found for this league.")
 
+    # 2. Increment the round
     state.current_round += 1
-    session.add(state)
-    session.commit()
+    db.add(state)
+    await db.commit()
 
     return {"message": f"✅ Round advanced to {state.current_round} for league {league_id}"}
 
 # =========================================
 # GENERATE FIXTURES MANUALLY
 # =========================================
-@router.post("/{league_id}/generate-fixtures")
-def generate_fixtures_endpoint(league_id: int, session: Session = Depends(get_session)):
+@router.post("/{league_id}/simulate-round")
+async def simulate_round_endpoint(league_id: int, db: AsyncSession = Depends(get_db)):
     """
-    Manually generate fixtures for the active season of a league.
-    Clears any existing fixtures and recreates them.
+    Simulate all matches in the current round for a given league.
+    - Finds the league's active season and current round.
+    - Fetches all unplayed fixtures in that round.
+    - Simulates each match using the existing simulate_match function.
+    - Automatically advances the round after simulation.
     """
-    try:
-        generate_fixtures_for_league(session, league_id)
-        return {"message": f"✅ Fixtures generated successfully for league {league_id}."}
-    except ValueError as e:
-        return {"error": str(e)}
-    except Exception as e:
-        return {"error": f"Unexpected error: {str(e)}"}
+    # 1. Fetch the active season state for this league
+    result = await db.execute(
+        select(SeasonState)
+        .join(Season, Season.id == SeasonState.season_id)
+        .where(Season.league_id == league_id)
+    )
+    season_state = result.scalar_one_or_none()
+
+    if not season_state:
+        raise HTTPException(status_code=404, detail="No active season state found for this league.")
+
+    current_round = season_state.current_round
+
+    # 2. Fetch all unplayed matches in this round
+    result = await db.execute(
+        select(Match)
+        .where(
+            Match.league_id == league_id,
+            Match.season_id == season_state.season_id,
+            Match.round_number == current_round,
+            Match.is_played == False
+        )
+    )
+    matches = result.scalars().all()
+
+    if not matches:
+        return {"message": f"No unplayed fixtures found in round {current_round} for league {league_id}."}
+
+    # 3. Simulate each match
+    results = []
+    for match in matches:
+        result = await simulate_match(db, match.id)
+        results.append(result)
+
+    # 4. Automatically advance to next round
+    season_state.current_round += 1
+    db.add(season_state)
+    await db.commit()
+
+    return {
+        "message": f"✅ Simulated {len(results)} matches for round {current_round} and advanced to round {season_state.current_round} in league {league_id}.",
+        "results": results
+    }
+
 
 @router.post("/simulate-match/{fixture_id}")
 async def simulate_match_endpoint(fixture_id: int, db: Session = Depends(get_db)):
