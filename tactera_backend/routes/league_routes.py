@@ -8,6 +8,8 @@ from tactera_backend.models.season_model import Season, SeasonState
 from tactera_backend.services.generate_fixtures import generate_fixtures_for_league
 from tactera_backend.core.database import get_db
 from tactera_backend.core.match_sim import simulate_match
+from sqlalchemy.ext.asyncio import AsyncSession
+
 
 router = APIRouter()
 
@@ -187,7 +189,7 @@ async def simulate_match_endpoint(fixture_id: int, db: Session = Depends(get_db)
     }
 
 @router.post("/{league_id}/simulate-round")
-async def simulate_round_endpoint(league_id: int, db: Session = Depends(get_db)):
+async def simulate_round_endpoint(league_id: int, db: AsyncSession = Depends(get_db)):
     """
     Simulate all matches in the current round for a given league.
     - Finds the league's active season and current round.
@@ -196,11 +198,12 @@ async def simulate_round_endpoint(league_id: int, db: Session = Depends(get_db))
     - Returns a summary of results.
     """
     # 1. Fetch the active season state for this league
-    season_state = db.exec(
+    result = await db.execute(
         select(SeasonState)
         .join(Season, Season.id == SeasonState.season_id)
         .where(Season.league_id == league_id)
-    ).first()
+    )
+    season_state = result.scalar_one_or_none()
 
     if not season_state:
         raise HTTPException(status_code=404, detail="No active season state found for this league.")
@@ -208,7 +211,7 @@ async def simulate_round_endpoint(league_id: int, db: Session = Depends(get_db))
     current_round = season_state.current_round
 
     # 2. Fetch all unplayed matches in this round
-    matches = db.exec(
+    result = await db.execute(
         select(Match)
         .where(
             Match.league_id == league_id,
@@ -216,7 +219,8 @@ async def simulate_round_endpoint(league_id: int, db: Session = Depends(get_db))
             Match.round_number == current_round,
             Match.is_played == False
         )
-    ).all()
+    )
+    matches = result.scalars().all()
 
     if not matches:
         return {"message": f"No unplayed fixtures found in round {current_round} for league {league_id}."}
@@ -231,3 +235,4 @@ async def simulate_round_endpoint(league_id: int, db: Session = Depends(get_db))
         "message": f"✅ Simulated {len(results)} matches for round {current_round} in league {league_id}.",
         "results": results
     }
+
