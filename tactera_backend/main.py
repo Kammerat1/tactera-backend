@@ -11,6 +11,7 @@ from tactera_backend.services.match import router as match_router
 from tactera_backend.routes.player_routes import router as player_router
 from tactera_backend.routes.league_routes import router as league_router
 from tactera_backend.services.training import router as training_router
+from tactera_backend.routes.stadium_routes import router as stadium_router
 
 app = FastAPI()
 
@@ -42,3 +43,4 @@ app.include_router(player_router, prefix="/players", tags=["Players"])
 app.include_router(match_router, prefix="/matches", tags=["Matches"])
 app.include_router(league_router, prefix="/leagues", tags=["Leagues"])
 app.include_router(training_router, prefix="/training", tags=["Training"])
+app.include_router(stadium_router, prefix="/stadiums", tags=["Stadiums"])

@@ -1,4 +1,4 @@
-# stadium_models.py
+# tactera_backend/models/stadium_model.py
 # Defines Stadium and StadiumPart models for club stadiums and their facilities.
 
 from typing import Optional
@@ -13,6 +13,12 @@ class Stadium(SQLModel, table=True):
 
     # Link stadium to its club
     club_id: int = Field(foreign_key="club.id")
+
+    # 🏟️ New fields
+    capacity: int = Field(default=10000)          # Total seats
+    pitch_quality: int = Field(default=50)        # 0–100 scale, affects injuries
+    base_ticket_price: float = Field(default=20)  # Ticket pricing (future)
+
 
 
 class StadiumPart(SQLModel, table=True):
