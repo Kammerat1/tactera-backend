@@ -47,7 +47,8 @@ def register_club(data: ClubRegister, session: Session = Depends(get_session)):
     # Step 3: Create 11 players linked to this club
     for i in range(11):
         player = Player(
-            name=f"Player {i+1}",
+            first_name=f"Player",
+            last_name=f"Test{i+1}",
             age=random.randint(18, 34),
             position="CM",  # or random.choice([...])
             height_cm=random.randint(165, 200),
@@ -190,7 +191,7 @@ def train_club(club_id: int, data: TrainingRequest, session: Session = Depends(g
 
         updated_players.append({
             "player_id": player.id,
-            "name": player.name,
+            f"{player.first_name} {player.last_name}"
             "total_xp_earned": int(total_xp),
             "stats": stat_summary
         })
@@ -355,7 +356,7 @@ def get_latest_training_session(
     for stat_entry, player in stats:
         players_data.append({
             "player_id": player.id,
-            "player_name": player.name,
+            f"{player.first_name} {player.last_name}"
             "stat_name": stat_entry.stat_name,  # ✅ Now included
             "xp_gained": stat_entry.xp_gained,
             "new_value": stat_entry.new_value,

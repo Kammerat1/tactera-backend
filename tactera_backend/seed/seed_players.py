@@ -24,7 +24,8 @@ def generate_random_player(index: int, club_id: int) -> Player:
     weight_kg = height_cm - 100 + random.randint(-5, 10)
 
     return Player(
-        name=f"Player {index}",
+        first_name=f"Player {index}",
+        last_name=f"Club{club.id}",
         age=random.randint(16, 34),
         position=position,
         height_cm=height_cm,

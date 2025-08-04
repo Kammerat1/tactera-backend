@@ -3,7 +3,8 @@ from sqlmodel import SQLModel, Field, Relationship
 
 class Player(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    name: str
+    first_name: str
+    last_name: str
     age: int
     position: str
     height_cm: int

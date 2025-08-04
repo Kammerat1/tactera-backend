@@ -116,7 +116,7 @@ def get_player_stat_levels(player_id: int, session: Session = Depends(get_sessio
         raise HTTPException(status_code=404, detail="Player not found")
 
     return {
-        "player_name": player.name,
+        f"{player.first_name} {player.last_name}"
         "pace": {"level": calculate_level_from_xp(player.pace_xp, session), "xp": player.pace_xp},
         "passing": {"level": calculate_level_from_xp(player.passing_xp, session), "xp": player.passing_xp},
         "defending": {"level": calculate_level_from_xp(player.defending_xp, session), "xp": player.defending_xp},
@@ -166,7 +166,7 @@ def get_player_training_history(
 
     return {
         "player_id": player_id,
-        "player_name": player.name,
+        "name": f"{player.first_name} {player.last_name}",
         "page": page,
         "limit": limit,
         "total_count": total_count,

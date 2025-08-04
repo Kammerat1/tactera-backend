@@ -210,7 +210,7 @@ def train_club(club_id: int, session: Session = Depends(get_session)):
                 updated_stats.append({"stat": stat.stat_name, "xp_gained": xp_split[stat.stat_name]})
 
         training_data.append({
-            "player": player.name,
+            f"{player.first_name} {player.last_name}",
             "total_xp": total_xp,
             "updated_stats": updated_stats
         })
