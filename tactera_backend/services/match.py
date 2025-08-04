@@ -1,3 +1,19 @@
+from fastapi import APIRouter, Depends, HTTPException
+from sqlmodel import Session, select
+from tactera_backend.models.club_model import Club
+from tactera_backend.models.match_model import MatchResult
+from tactera_backend.core.database import get_session
+from tactera_backend.models.player_model import Player
+import random
+
+# --- Injury imports ---
+from tactera_backend.core.injury_generator import calculate_injury_risk, generate_injury
+from tactera_backend.models.stadium_model import Stadium
+
+# ✅ Define router BEFORE using it
+router = APIRouter()
+
+
 @router.post("/simulate")
 def simulate_match(home_email: str, away_email: str, session: Session = Depends(get_session)):
     """
