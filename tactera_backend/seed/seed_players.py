@@ -25,7 +25,7 @@ def generate_random_player(index: int, club_id: int) -> Player:
 
     return Player(
         first_name=f"Player {index}",
-        last_name=f"Club{club.id}",
+        last_name=f"Club{club_id}",
         age=random.randint(16, 34),
         position=position,
         height_cm=height_cm,
@@ -41,6 +41,9 @@ def generate_random_player(index: int, club_id: int) -> Player:
         
         club_id=club_id
     )
+    
+
+
 
 def seed_players():
     with Session(sync_engine) as session:

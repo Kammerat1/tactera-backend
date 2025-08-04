@@ -11,11 +11,6 @@ from tactera_backend.core.injury_generator import calculate_injury_risk, generat
 # -------------------------------------------------------------
 # Enhanced Match Simulator (with injury system)
 # -------------------------------------------------------------
-# Simulates a single match:
-# - Fetches fixture, clubs, players, stadium pitch quality.
-# - Generates random goals (MVP placeholder).
-# - Rolls for injuries for all participating players.
-# -------------------------------------------------------------
 
 async def simulate_match(db: AsyncSession, fixture_id: int):
     """
@@ -46,9 +41,10 @@ async def simulate_match(db: AsyncSession, fixture_id: int):
     away_players_result = await db.execute(select(Player).where(Player.club_id == away_club.id))
     away_players = away_players_result.scalars().all()
 
-    # 4️⃣ Fetch stadium for pitch quality
-    stadium = await db.get(Stadium, home_club.stadium_id)
-    pitch_quality = stadium.pitch_quality if stadium else 50  # Default to 50 if missing
+    # 4️⃣ Fetch stadium for pitch quality (corrected)
+    stadium_result = await db.execute(select(Stadium).where(Stadium.club_id == home_club.id))
+    stadium = stadium_result.scalar_one_or_none()
+    pitch_quality = stadium.pitch_quality if stadium else 50  # Default to 50 if no stadium
 
     # 5️⃣ Basic goal simulation (placeholder)
     home_goals = random.randint(0, 4)
@@ -60,23 +56,20 @@ async def simulate_match(db: AsyncSession, fixture_id: int):
     fixture.is_played = True
     fixture.match_time = datetime.utcnow()
 
-    # Commit match result
     await db.commit()
     await db.refresh(fixture)
 
     # 6️⃣ Injury logic
     injuries = []
-    base_risk = 0.05  # 5% baseline injury chance
+    base_risk = 0.05  # 5% baseline risk
 
     all_players = home_players + away_players
     for player in all_players:
-        energy = 100  # Placeholder for now (dynamic later)
-        injury_proneness = 1.0  # Placeholder hidden stat
+        energy = 100  # Placeholder (to be dynamic later)
+        injury_proneness = 1.0  # Placeholder (hidden stat later)
 
-        # Calculate risk based on pitch + placeholders
         risk = calculate_injury_risk(base_risk, pitch_quality, energy, injury_proneness)
 
-        # Roll for injury
         if random.random() < risk:
             injury_data = generate_injury()
             injuries.append({
@@ -85,7 +78,6 @@ async def simulate_match(db: AsyncSession, fixture_id: int):
                 **injury_data
             })
 
-    # 7️⃣ Return result (injuries included for now)
     return {
         "fixture_id": fixture.id,
         "home_club_id": fixture.home_club_id,
@@ -93,5 +85,5 @@ async def simulate_match(db: AsyncSession, fixture_id: int):
         "home_goals": home_goals,
         "away_goals": away_goals,
         "played_at": fixture.match_time,
-        "injuries": injuries  # Debug (DB model will come later)
+        "injuries": injuries  # Debug output (later DB integration)
     }

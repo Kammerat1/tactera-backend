@@ -161,82 +161,6 @@ async def advance_round(league_id: int, db: AsyncSession = Depends(get_db)):
 
     return {"message": f"✅ Round advanced to {state.current_round} for league {league_id}"}
 
-# =========================================
-# GENERATE FIXTURES MANUALLY
-# =========================================
-@router.post("/{league_id}/simulate-round")
-async def simulate_round_endpoint(league_id: int, db: AsyncSession = Depends(get_db)):
-    """
-    Simulate all matches in the current round for a given league.
-    - Simulates all fixtures in the current round.
-    - Automatically advances the round afterward.
-    - Prevents advancing beyond the final round.
-    """
-    # 1. Fetch the active season state
-    result = await db.execute(
-        select(SeasonState)
-        .join(Season, Season.id == SeasonState.season_id)
-        .where(Season.league_id == league_id)
-    )
-    season_state = result.scalar_one_or_none()
-
-    if not season_state:
-        raise HTTPException(status_code=404, detail="No active season state found for this league.")
-
-    current_round = season_state.current_round
-
-    # 2. Calculate the final round (teams play each other twice)
-    league_result = await db.execute(select(League).where(League.id == league_id))
-    league = league_result.scalar_one_or_none()
-
-    if not league:
-        raise HTTPException(status_code=404, detail="League not found.")
-
-    club_result = await db.execute(select(Club).where(Club.league_id == league_id))
-    clubs = club_result.scalars().all()
-    num_clubs = len(clubs)
-    final_round = (num_clubs - 1) * 2  # double round robin
-
-    # 3. Check if season already completed
-    if current_round > final_round:
-        return {"message": f"Season already completed. Final round was {final_round}."}
-
-    # 4. Fetch unplayed matches for current round
-    result = await db.execute(
-        select(Match)
-        .where(
-            Match.league_id == league_id,
-            Match.season_id == season_state.season_id,
-            Match.round_number == current_round,
-            Match.is_played == False
-        )
-    )
-    matches = result.scalars().all()
-
-    if not matches:
-        return {"message": f"No unplayed fixtures found in round {current_round} for league {league_id}."}
-
-    # 5. Simulate matches
-    results = []
-    for match in matches:
-        result = await simulate_match(db, match.id)
-        results.append(result)
-
-    # 6. Advance round or mark season completed
-    if season_state.current_round < final_round:
-        season_state.current_round += 1
-        db.add(season_state)
-        await db.commit()
-        round_message = f"Advanced to round {season_state.current_round}."
-    else:
-        season_state.is_completed = True  # ✅ Mark season as completed
-        db.add(season_state)
-        await db.commit()
-        round_message = f"Season completed at round {final_round}."
-
-
-
-
 @router.post("/simulate-match/{fixture_id}")
 async def simulate_match_endpoint(fixture_id: int, db: Session = Depends(get_db)):
     """
@@ -254,12 +178,11 @@ async def simulate_match_endpoint(fixture_id: int, db: Session = Depends(get_db)
 async def simulate_round_endpoint(league_id: int, db: AsyncSession = Depends(get_db)):
     """
     Simulate all matches in the current round for a given league.
-    - Finds the league's active season and current round.
-    - Fetches all unplayed fixtures in that round.
-    - Simulates each match using the existing simulate_match function.
-    - Returns a summary of results.
+    - Finds the active season and current round.
+    - Simulates all unplayed fixtures for the round.
+    - Advances to the next round (or completes season if final).
     """
-    # 1. Fetch the active season state for this league
+    # 1. Fetch the active season state
     result = await db.execute(
         select(SeasonState)
         .join(Season, Season.id == SeasonState.season_id)
@@ -272,8 +195,19 @@ async def simulate_round_endpoint(league_id: int, db: AsyncSession = Depends(get
 
     current_round = season_state.current_round
 
-    # 2. Fetch all unplayed matches in this round
-    result = await db.execute(
+    # 2. Fetch league & clubs
+    league_result = await db.execute(select(League).where(League.id == league_id))
+    league = league_result.scalar_one_or_none()
+    if not league:
+        raise HTTPException(status_code=404, detail="League not found.")
+
+    club_result = await db.execute(select(Club).where(Club.league_id == league_id))
+    clubs = club_result.scalars().all()
+    num_clubs = len(clubs)
+    final_round = (num_clubs - 1) * 2  # double round robin
+
+    # 3. Fetch unplayed matches for current round
+    match_result = await db.execute(
         select(Match)
         .where(
             Match.league_id == league_id,
@@ -282,19 +216,33 @@ async def simulate_round_endpoint(league_id: int, db: AsyncSession = Depends(get
             Match.is_played == False
         )
     )
-    matches = result.scalars().all()
+    matches = match_result.scalars().all()
 
     if not matches:
-        return {"message": f"No unplayed fixtures found in round {current_round} for league {league_id}."}
+        return {
+            "message": f"No unplayed fixtures found in round {current_round} for league {league_id}.",
+            "results": []
+        }
 
-    # 3. Simulate each match
+    # 4. Simulate matches
     results = []
     for match in matches:
         result = await simulate_match(db, match.id)
         results.append(result)
 
+    # 5. Advance round or complete season
+    if season_state.current_round < final_round:
+        season_state.current_round += 1
+        db.add(season_state)
+        await db.commit()
+        round_message = f"✅ Simulated round {current_round}. Advanced to round {season_state.current_round}."
+    else:
+        season_state.is_completed = True
+        db.add(season_state)
+        await db.commit()
+        round_message = f"✅ Simulated final round {current_round}. Season marked complete."
+
     return {
-        "message": f"✅ Simulated {len(results)} matches for round {current_round} in league {league_id}.",
+        "message": round_message,
         "results": results
     }
-
