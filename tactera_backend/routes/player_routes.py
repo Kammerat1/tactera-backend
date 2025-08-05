@@ -1,11 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
-from tactera_backend.core.database import get_session
+from tactera_backend.core.database import get_session, get_db
 from tactera_backend.models.training_model import TrainingHistory, TrainingHistoryStat
 from tactera_backend.models.player_model import Player
 from tactera_backend.models.stat_level_requirement_model import StatLevelRequirement
 from tactera_backend.services.xp_helper import calculate_level_from_xp, add_xp_to_stat
 from typing import Optional
+from tactera_backend.services.injury_service import tick_injuries
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter()
 
@@ -172,3 +174,49 @@ def get_player_training_history(
         "total_count": total_count,
         "history": history
     }
+    
+    # ================================
+    # DEBUG: TICK INJURIES
+    # ================================
+
+@router.post("/debug/tick-injuries")
+async def debug_tick_injuries(db: AsyncSession = Depends(get_db)):
+    """
+    Debug: Progress injury recovery by 1 day for all injured players.
+    """
+    result = await tick_injuries(db)
+    return result
+
+# ================================
+# LIST CURRENT INJURIES
+# ================================
+from tactera_backend.models.injury_model import Injury
+from sqlmodel import select
+
+@router.get("/injuries")
+async def list_current_injuries(db: AsyncSession = Depends(get_db)):
+    """
+    Lists all currently injured players and their injury details.
+    """
+    result = await db.execute(select(Injury).where(Injury.days_remaining > 0))
+    injuries = result.scalars().all()
+
+    return [
+        {
+            "player_id": i.player_id,
+            "injury": i.name,
+            "severity": i.severity,
+            "days_remaining": i.days_remaining,
+            "fit_for_matches": i.fit_for_matches
+        }
+        for i in injuries
+    ]
+
+from tactera_backend.services.game_tick_service import process_daily_tick
+
+@router.post("/debug/daily-tick")
+async def debug_daily_tick(db: AsyncSession = Depends(get_db)):
+    """
+    Debug: Advances the game by 1 in-game day and processes all daily updates.
+    """
+    return await process_daily_tick(db)

@@ -1,8 +1,10 @@
 from fastapi import FastAPI
 from sqlmodel import select, Session
-from tactera_backend.core.database import init_db, sync_engine
+from tactera_backend.core.database import init_db, sync_engine, engine
 from tactera_backend.seed.seed_all import seed_all
 from tactera_backend.models.league_model import League
+from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime, timedelta, timezone
 
 # --- Routers ---
 from tactera_backend.core.auth import router as auth_router
@@ -36,6 +38,33 @@ async def on_startup():
             seed_all()  # ✅ Uses sync engine only
         else:
             print("✅ Database already seeded. Skipping auto-seed.")
+            
+import asyncio
+from tactera_backend.services.game_tick_service import process_daily_tick
+
+@app.on_event("startup")
+async def start_daily_tick_loop():
+    async def daily_tick_loop():
+        tz = timezone(timedelta(hours=2))  # ✅ UTC+2
+
+        while True:
+            now = datetime.now(tz)  # Current UTC+2 time
+            tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            seconds_until_midnight = (tomorrow - now).total_seconds()
+
+            # Sleep until UTC+2 midnight
+            await asyncio.sleep(seconds_until_midnight)
+
+            # Process daily tick
+            async with AsyncSession(engine) as session:
+                await process_daily_tick(session)
+            print(f"[{datetime.now(tz)}] ✅ Daily tick processed (UTC+2 midnight).")
+
+            # Wait 24 hours for next tick
+            await asyncio.sleep(86400)
+    asyncio.create_task(daily_tick_loop())
+
+
 
 # Routers
 app.include_router(auth_router, prefix="/auth", tags=["Auth"])
