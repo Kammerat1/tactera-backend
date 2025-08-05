@@ -158,74 +158,78 @@ def split_xp_among_stats(total_xp: float, stat_list: List[str]) -> Dict[str, flo
 
 router = APIRouter()
 
-'''
-# DEPRECATED - NOW IN CLUB.PY
-@router.post("/clubs/{club_id}/train")
-def train_club(club_id: int, session: Session = Depends(get_session)):
-    # Get today's date
-    today = date.today()
 
-    # Load the club
-    club = session.exec(select(Club).where(Club.id == club_id)).first()
-    if not club:
-        raise HTTPException(status_code=404, detail="Club not found")
+# --- INJURY-AWARE TRAINING HELPER ---
 
-    # Check if already trained today
-    if club.last_training_date == today:
-        raise HTTPException(status_code=403, detail="Club has already trained today")
+from tactera_backend.models.injury_model import Injury  # ✅ Needed to check injuries
 
-    # Load all players in the club
-    players = session.exec(select(Player).where(Player.club_id == club.id)).all()
+def apply_training_with_injury_check(player: Player, drill: Dict, session: Session) -> Dict:
+    """
+    Applies training XP to a player, respecting injury and rehab status.
+    - Fully injured players: skipped.
+    - Rehab-phase players: forced to light training XP.
+    - Healthy players: normal training.
+    Returns a structured result dict.
+    """
+    # ✅ 1. Check if player has an active injury
+    active_injury = session.exec(
+        select(Injury).where(Injury.player_id == player.id).order_by(Injury.start_date.desc())
+    ).first()
 
-    if not players:
-        raise HTTPException(status_code=404, detail="No players found in this club")
+    if active_injury:
+        # Phase 1: Fully out (cannot train at all)
+        if active_injury.days_remaining > active_injury.rehab_start:
+            return {
+                "player": f"{player.first_name} {player.last_name}",
+                "status": "skipped (fully injured)",
+                "xp_applied": 0,
+                "notes": f"Injury: {active_injury.name} ({active_injury.severity})"
+            }
 
-    # Load stats for each player
-    training_data = []
+        # Phase 2: Rehab (auto-light training)
+        training_intensity = "light"
+        rehab_penalty = 0.5  # ✅ Only 50% XP efficiency during rehab
+    else:
+        # No injury: normal training
+        training_intensity = "normal"
+        rehab_penalty = 1.0
 
-    for player in players:
-        stats = session.exec(select(PlayerStat).where(PlayerStat.player_id == player.id)).all()
+    # ✅ 2. Calculate XP
+    tg = session.exec(
+        select(TrainingGround).where(TrainingGround.id == player.club.trainingground_id)
+    ).first()
+    tg_boost = tg.xp_boost if tg else 100
 
-        drill = get_drill_by_name("1v1 Challenge")
+    total_xp = calculate_training_xp(
+        potential=player.potential,
+        ambition=player.ambition,
+        consistency=player.consistency,
+        training_ground_boost=tg_boost
+    )
 
-        tg = session.exec(
-            select(TrainingGround).where(TrainingGround.id == club.trainingground_id)
-        ).first()
-        tg_boost = tg.xp_boost if tg else 100
+    # ✅ 3. Apply rehab penalty if needed
+    total_xp *= rehab_penalty
 
-        total_xp = calculate_training_xp(
-            potential=player.potential,
-            ambition=player.ambition,
-            consistency=player.consistency,
-            training_ground_boost=tg_boost
-        )
+    # ✅ 4. Split XP across stats
+    xp_split = split_xp_among_stats(total_xp, drill["affected_stats"])
 
-        xp_split = split_xp_among_stats(total_xp, drill["affected_stats"])
-
-        updated_stats = []
-
-        for stat in stats:
-            if stat.stat_name in xp_split:
-                stat.xp += xp_split[stat.stat_name]
-                updated_stats.append({"stat": stat.stat_name, "xp_gained": xp_split[stat.stat_name]})
-
-        training_data.append({
-            f"{player.first_name} {player.last_name}",
-            "total_xp": total_xp,
-            "updated_stats": updated_stats
-        })
-
-    # Set the cooldown
-    club.last_training_date = today
-
-    # Save all updates
-    session.add(club)
+    # ✅ 5. Update player stats
+    updated_stats = []
+    for stat in session.exec(select(PlayerStat).where(PlayerStat.player_id == player.id)).all():
+        if stat.stat_name in xp_split:
+            stat.xp += xp_split[stat.stat_name]
+            updated_stats.append({"stat": stat.stat_name, "xp_gained": xp_split[stat.stat_name]})
     session.commit()
 
-
     return {
-        "message": "Training complete (dry run)",
-        "players": training_data
-    } '''
-
+        "player": f"{player.first_name} {player.last_name}",
+        "status_flag": "rehab-light" if active_injury and active_injury.days_remaining <= active_injury.rehab_start 
+                       else "skipped" if active_injury and active_injury.days_remaining > active_injury.rehab_start 
+                       else "normal",
+        "xp_applied": round(total_xp, 2),
+        "updated_stats": updated_stats,
+        "notes": f"Injury: {active_injury.name} (rehab phase)" if active_injury and active_injury.days_remaining <= active_injury.rehab_start 
+                 else f"Injury: {active_injury.name} (fully out)" if active_injury 
+                 else "Healthy"
+    }
 

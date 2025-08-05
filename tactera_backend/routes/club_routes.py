@@ -89,11 +89,15 @@ class TrainingRequest(BaseModel):
     drill_name: str
 
 # Endpoint to train a club's squad
+# Endpoint to train a club's squad
 @router.post("/{club_id}")
 def train_club(club_id: int, data: TrainingRequest, session: Session = Depends(get_session)):
     """
     Trains all players in a club using the selected drill.
-    Distributes XP to affected stats and logs training history.
+    Applies injury-aware logic:
+    - Fully injured players are skipped.
+    - Rehab-phase players auto-train at light intensity (reduced XP).
+    - Healthy players train normally.
     """
     print("Training club:", club_id)
 
@@ -102,130 +106,65 @@ def train_club(club_id: int, data: TrainingRequest, session: Session = Depends(g
     if not club:
         raise HTTPException(status_code=404, detail="Club not found.")
 
-    # ✅ Get training ground by direct reference
+    # ✅ Get training ground
     training_ground = session.get(TrainingGround, club.trainingground_id)
     if not training_ground:
         raise HTTPException(status_code=404, detail="Training ground not found.")
-    
-        # ============================
-    # DAILY TRAINING COOLDOWN CHECK
-    # ============================
-    from tactera_backend.core.config import TEST_MODE
+
+    from tactera_backend.core.config import TEST_MODE  # ✅ Import locally inside the function
+
+    # ✅ Cooldown check
     if not TEST_MODE:
-        today = date.today()
-        existing_session = (
-            session.query(TrainingHistory)
-            .filter(TrainingHistory.club_id == club_id)
-            .filter(TrainingHistory.training_date == today)
-            .first()
-        )
-        if existing_session:
-            return {"message": "Training cooldown active. This club has already trained today."}
-    else:
-        print("⚠ TEST_MODE active: Skipping training cooldown.")
+        if club.last_training_date == date.today():
+            raise HTTPException(status_code=403, detail="This club has already trained today.")
 
-    # ✅ Validate chosen drill
-    selected_drill = next((d for d in DRILLS if d["name"].lower() == data.drill_name.lower()), None)
-    if not selected_drill:
-        raise HTTPException(status_code=400, detail=f"Invalid drill: {data.drill_name}")
 
-    affected_stats = selected_drill["affected_stats"]
-
-    # ✅ Get the squad (single query)
+    # ✅ Fetch players
     players = session.exec(select(Player).where(Player.club_id == club_id)).all()
     if not players:
-        raise HTTPException(status_code=400, detail="Squad is empty.")
+        raise HTTPException(status_code=404, detail="No players found for this club.")
 
+    # ✅ Validate chosen drill
+    drill = next((d for d in DRILLS if d["name"].lower() == data.drill_name.lower()), None)
+    if not drill:
+        raise HTTPException(status_code=400, detail="Invalid drill selected.")
+
+    # ✅ Injury-aware training
+    from tactera_backend.services.training import apply_training_with_injury_check
     updated_players = []
 
-    # === Apply training ===
     for player in players:
-        # Get all PlayerStat rows for this player
-        player_stats = session.exec(
-            select(PlayerStat).where(PlayerStat.player_id == player.id)
-        ).all()
+        result = apply_training_with_injury_check(player, drill, session)
+        updated_players.append(result)
+    
+        # ✅ Build summary counts based on status_flag
+    summary = {
+        "normal": sum(1 for p in updated_players if p["status_flag"] == "normal"),
+        "rehab": sum(1 for p in updated_players if p["status_flag"] == "rehab-light"),
+        "skipped": sum(1 for p in updated_players if p["status_flag"] == "skipped")
+    }
 
-        # 1️⃣ Calculate total XP for this player
-        total_xp = calculate_training_xp(
-            potential=player.potential,
-            ambition=player.ambition,
-            consistency=player.consistency,
-            training_ground_boost=training_ground.xp_boost
-        )
-
-        # 2️⃣ Split XP among affected stats
-        stat_xp_map = split_xp_among_stats(total_xp, affected_stats)
-
-        # 3️⃣ Apply XP to each stat
-        delta_map = {}
-        for stat_name, xp_gain in stat_xp_map.items():
-            stat = next((s for s in player_stats if s.stat_name == stat_name), None)
-
-            # If stat record doesn't exist yet, create it
-            if not stat:
-                stat = PlayerStat(
-                    player_id=player.id,
-                    stat_name=stat_name,
-                    value=1,
-                    xp=0
-                )
-                session.add(stat)
-                session.flush()  # Ensure stat has an ID before updating
-                session.refresh(stat)
-                player_stats.append(stat)
-
-            stat.xp += int(xp_gain)
-            delta_map[stat_name] = int(xp_gain)
-            stat.value = get_stat_level(stat.xp, session)
-            session.add(stat)
-
-        # Prepare return payload for this player
-        stat_summary = {
-            stat.stat_name: {
-                "value": stat.value,
-                "xp": stat.xp,
-                "delta_xp": delta_map.get(stat.stat_name, 0)
-            }
-            for stat in player_stats
-        }
-
-        updated_players.append({
-            "player_id": player.id,
-            f"{player.first_name} {player.last_name}"
-            "total_xp_earned": int(total_xp),
-            "stats": stat_summary
-        })
 
     # ✅ Update last training date
     club.last_training_date = date.today()
     session.add(club)
-
-    # 1️⃣ Log main training history record
-    history = TrainingHistory(
-        club_id=club.id,
-        drill_name=selected_drill["name"],
-        total_xp=sum(p["total_xp_earned"] for p in updated_players)
-    )
-    session.add(history)
-    session.flush()  # ✅ Now history.id is available
-
-    # 2️⃣ Log per-player stat updates
-    for player_data in updated_players:
-        for stat_name, stat_info in player_data["stats"].items():
-            session.add(TrainingHistoryStat(
-                training_history_id=history.id,
-                player_id=player_data["player_id"],
-                stat_name=stat_name,
-                xp_gained=stat_info["delta_xp"],
-                new_value=stat_info["value"]
-            ))
-
     session.commit()
+    
+        # ✅ Debug summary logging (TEST_MODE only)
+    from tactera_backend.core.config import TEST_MODE
+    if TEST_MODE:
+        print("\n=== TRAINING SESSION SUMMARY ===")
+        print(f"Club: {club.name} (ID: {club.id}) | Drill: {drill['name']}")
+        for result in updated_players:
+            print(f" - {result['player']}: {result['status_flag']} | XP: {result['xp_applied']} | {result['notes']}")
+        print("=== END SESSION SUMMARY ===\n")
 
-    # ✅ Fixed return payload: total XP is sum of all players' XP
+
+    # ✅ Return training results
     return {
-        "total_xp_earned": sum(p["total_xp_earned"] for p in updated_players),
-        "players_trained": updated_players
+        "message": "Training complete",
+        "summary": summary,
+        "results": updated_players
     }
 
 
