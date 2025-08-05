@@ -220,3 +220,94 @@ async def debug_daily_tick(db: AsyncSession = Depends(get_db)):
     Debug: Advances the game by 1 in-game day and processes all daily updates.
     """
     return await process_daily_tick(db)
+
+from tactera_backend.models.player_model import Player, PlayerRead
+from tactera_backend.models.injury_model import Injury
+import pytz
+
+# ✅ UTC+2 timezone (Europe/Copenhagen) for injury date consistency
+utc_plus_2 = pytz.timezone("Europe/Copenhagen")
+
+@router.get("/players/{player_id}", response_model=PlayerRead)
+def get_player(player_id: int, session: Session = Depends(get_session)):
+    """
+    Fetch a single player by ID and include their active injury if present.
+    - Returns injury details (name, severity, days remaining, rehab info).
+    - Injury dates are returned in UTC+2.
+    """
+    # 🔎 Retrieve player by ID
+    player = session.get(Player, player_id)
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    # ✅ Find active injury (if any: days_remaining > 0)
+    active_injury = None
+    if player.injuries:
+        for injury in player.injuries:
+            if injury.days_remaining > 0:
+                injury.start_date = injury.start_date.astimezone(utc_plus_2)
+                active_injury = injury
+                print(f"[DEBUG] Active injury for {player.first_name} {player.last_name}: {injury.name}")
+                break
+        if not active_injury:
+            print(f"[DEBUG] No active injuries for {player.first_name} {player.last_name}")
+    else:
+        print(f"[DEBUG] Player {player.first_name} {player.last_name} has no injury history.")
+
+    # ✅ Return player with injury info attached
+    return PlayerRead.from_orm(player).copy(update={"active_injury": active_injury})
+
+
+from datetime import timedelta
+import pytz
+
+utc_plus_2 = pytz.timezone("Europe/Copenhagen")
+
+@router.get("/players/{player_id}/injuries")
+def get_player_injury_history(player_id: int, session: Session = Depends(get_session)):
+    """
+    Returns the full injury history for a player (active + healed).
+    Includes end_date for healed injuries. Dates are UTC+2.
+    """
+    # 1️⃣ Fetch player
+    player = session.get(Player, player_id)
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    # 2️⃣ Query all injuries
+    injuries = session.exec(select(Injury).where(Injury.player_id == player_id)).all()
+
+    if not injuries:
+        return {
+            "player_id": player_id,
+            "player_name": f"{player.first_name} {player.last_name}",
+            "injuries": []
+        }
+
+    # 3️⃣ Build response
+    history = []
+    for injury in injuries:
+        start_utc2 = injury.start_date.astimezone(utc_plus_2)
+        end_date = None
+        if injury.days_remaining == 0:
+            end_date = (injury.start_date + timedelta(days=injury.days_total)).astimezone(utc_plus_2)
+
+        history.append({
+            "name": injury.name,
+            "type": injury.type,
+            "severity": injury.severity,
+            "start_date": start_utc2,
+            "end_date": end_date,  # ✅ New field
+            "days_total": injury.days_total,
+            "days_remaining": injury.days_remaining,
+            "rehab_start": injury.rehab_start,
+            "rehab_xp_multiplier": injury.rehab_xp_multiplier,
+            "fit_for_matches": injury.fit_for_matches,
+            "active": injury.days_remaining > 0
+        })
+
+    return {
+        "player_id": player_id,
+        "player_name": f"{player.first_name} {player.last_name}",
+        "injuries": history
+    }

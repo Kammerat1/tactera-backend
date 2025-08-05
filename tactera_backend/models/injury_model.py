@@ -1,6 +1,9 @@
-from typing import Optional
-from sqlmodel import SQLModel, Field
+from sqlmodel import SQLModel, Field, Relationship  # ✅ add Relationship here
+from typing import Optional, TYPE_CHECKING
 from datetime import datetime
+
+if TYPE_CHECKING:
+    from .player_model import Player  # ✅ forward reference to avoid circular import
 
 class Injury(SQLModel, table=True):
     """Tracks player injuries, their recovery progress, and match availability."""
@@ -15,3 +18,6 @@ class Injury(SQLModel, table=True):
     rehab_xp_multiplier: float  # XP modifier during rehab
     fit_for_matches: bool = Field(default=False)  # Whether cleared for matches
     days_remaining: int  # Countdown until recovery
+
+    # ✅ NEW: Relationship back to Player
+    player: "Player" = Relationship(back_populates="injuries")

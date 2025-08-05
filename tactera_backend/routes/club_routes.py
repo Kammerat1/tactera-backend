@@ -369,3 +369,50 @@ def get_latest_training_session(
         "total_xp": latest_training.total_xp,
         "players": players_data,
     }
+
+from tactera_backend.models.player_model import Player, PlayerRead
+from tactera_backend.models.injury_model import Injury
+import pytz
+
+utc_plus_2 = pytz.timezone("Europe/Copenhagen")
+
+@router.get("/clubs/{club_id}/squad")
+def get_club_squad(club_id: int, session: Session = Depends(get_session)):
+    """
+    Returns the full squad for a given club.
+    Each player includes active injury info (if injured).
+    """
+    # 1️⃣ Fetch the club
+    club = session.get(Club, club_id)
+    if not club:
+        raise HTTPException(status_code=404, detail="Club not found.")
+
+    # 2️⃣ Fetch all players in the squad
+    players = session.exec(select(Player).where(Player.club_id == club_id)).all()
+    if not players:
+        return {"club_id": club_id, "squad": []}
+
+    squad_with_injuries = []
+
+    # 3️⃣ Loop players, attach active injury info
+    for player in players:
+        active_injury = None
+        if player.injuries:
+            for injury in player.injuries:
+                if injury.days_remaining > 0:
+                    injury.start_date = injury.start_date.astimezone(utc_plus_2)
+                    active_injury = injury
+                    print(f"[DEBUG] Active injury for {player.first_name} {player.last_name}: {injury.name}")
+                    break
+        else:
+            print(f"[DEBUG] Player {player.first_name} {player.last_name} has no injury history.")
+
+        # Convert Player -> PlayerRead (with injury)
+        player_data = PlayerRead.from_orm(player).copy(update={"active_injury": active_injury})
+        squad_with_injuries.append(player_data)
+
+    return {
+        "club_id": club_id,
+        "club_name": club.name,
+        "squad": squad_with_injuries
+    }
