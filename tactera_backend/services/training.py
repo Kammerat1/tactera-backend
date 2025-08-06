@@ -177,14 +177,16 @@ def apply_training_with_injury_check(player: Player, drill: Dict, session: Sessi
     ).first()
 
     if active_injury:
-        # Phase 1: Fully out (cannot train at all)
+    # Phase 1: Fully out (cannot train at all)
         if active_injury.days_remaining > active_injury.rehab_start:
             return {
                 "player": f"{player.first_name} {player.last_name}",
-                "status": "skipped (fully injured)",
+                "status_flag": "skipped",
                 "xp_applied": 0,
-                "notes": f"Injury: {active_injury.name} ({active_injury.severity})"
+                "updated_stats": [],
+                "notes": f"Injury: {active_injury.name} (fully out)"
             }
+
 
         # Phase 2: Rehab (auto-light training)
         training_intensity = "light"

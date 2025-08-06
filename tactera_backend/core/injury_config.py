@@ -45,3 +45,7 @@ INJURY_SEVERITY_WEIGHTS = {
     "severe": 0.08,     # 8% severe
     "major": 0.02,      # 2% major (rare)
 }
+
+# 🔁 Reinjury risk multiplier (applied during rehab-phase matches)
+REINJURY_MULTIPLIER = 1.5  # Default: 50% higher risk when playing in rehab
+
