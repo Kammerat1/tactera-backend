@@ -7,6 +7,7 @@ from tactera_backend.models.player_model import Player
 import random
 from tactera_backend.models.player_stat_model import PlayerStat
 from datetime import datetime, timedelta, timezone
+from typing import List
 
 # --- Injury imports ---
 from tactera_backend.core.injury_generator import calculate_injury_risk, generate_injury
@@ -163,8 +164,26 @@ def simulate_match(home_email: str, away_email: str, session: Session = Depends(
         print(f"\n[DEBUG] Match Injury Summary: Total={total}, New={new_injuries}, Reinjuries={reinjuries}\n")
 
     # ✅ Split injuries by team
-    home_injuries = [inj for inj in injuries if any(p.id == inj["player_id"] for p in home_players)]
-    away_injuries = [inj for inj in injuries if any(p.id == inj["player_id"] for p in away_players)]
+    home_injuries = [inj for inj in injuries if "player_id" in inj and any(p.id == inj["player_id"] for p in home_players)]
+    away_injuries = [inj for inj in injuries if "player_id" in inj and any(p.id == inj["player_id"] for p in away_players)]
+    
+        # 🧠 ENERGY DRAIN AFTER MATCH (default: 90 mins, balanced tactics)
+    def drain_energy(players: List[Player], minutes_played: int = 90, intensity_factor: float = 1.0):
+        """
+        Reduce energy based on minutes played and tactical intensity.
+        - Default minutes: 90
+        - Default intensity: 1.0 (balanced)
+        """
+        base_energy_loss = minutes_played * 0.2 * intensity_factor  # Full 90 mins = 18 energy loss
+        for player in players:
+            player.energy = max(0, player.energy - int(base_energy_loss))
+            session.add(player)
+
+    # Apply energy drain to both teams
+    drain_energy(home_players)
+    drain_energy(away_players)
+    session.commit()
+
 
     # ✅ Return data
     return {

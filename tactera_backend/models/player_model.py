@@ -9,9 +9,11 @@ class Player(SQLModel, table=True):
     first_name: str
     last_name: str
     age: int
+    energy: int = Field(default=100, ge=0, le=100, description="Current energy level (0–100)")
     position: str
     height_cm: int
     weight_kg: int
+    
     preferred_foot: str  # "left", "right", or "both"
     is_goalkeeper: bool
 
