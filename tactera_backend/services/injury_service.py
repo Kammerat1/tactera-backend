@@ -1,4 +1,4 @@
-from sqlmodel import select
+from sqlmodel import select, Session
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from tactera_backend.models.injury_model import Injury
@@ -61,4 +61,18 @@ async def tick_injuries(db: AsyncSession):
         for i in injuries
     ]
 }
+# ✅ CHECK IF A PLAYER IS FULLY INJURED
+async def is_player_fully_injured(player_id: int, session: AsyncSession) -> bool:
+    """
+    Returns True if the player currently has an active injury (days_remaining > 0).
+    """
+    from tactera_backend.models.injury_model import Injury
 
+    stmt = select(Injury).where(
+        Injury.player_id == player_id,
+        Injury.days_remaining > 0
+    )
+
+    result = await session.execute(stmt)
+    injury = result.scalars().first()
+    return injury is not None
