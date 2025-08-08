@@ -11,6 +11,8 @@ from sqlmodel import Session, select
 from datetime import date
 from tactera_backend.core.database import get_session
 from tactera_backend.models.club_model import Club
+from tactera_backend.core.training_intensity import get_xp_multiplier, calculate_energy_drain
+
 
 
 # === DRILL DEFINITIONS ===
@@ -212,6 +214,27 @@ def apply_training_with_injury_check(player: Player, drill: Dict, session: Sessi
     # ✅ 3. Apply rehab penalty if needed
     total_xp *= rehab_penalty
 
+    # --- INTENSITY APPLICATION (XP + ENERGY) ---
+    # Determine the club's chosen intensity, defaulting to "normal"
+    club_intensity = (player.club.training_intensity if player and player.club else "normal").lower()
+
+    # If the player is in rehab (allowed training), force light intensity for safety.
+    effective_intensity = club_intensity
+    if active_injury:
+        # If the player is in the rehab phase, we force light.
+        if active_injury.days_remaining <= active_injury.rehab_start:
+            effective_intensity = "light"
+
+    # Apply XP multiplier to the already computed base_xp
+    xp_mult = get_xp_multiplier(effective_intensity)
+    base_xp = base_xp * xp_mult  # base_xp exists earlier in this function
+
+    # Apply energy drain and persist
+    energy_before = player.energy
+    energy_drain = calculate_energy_drain(effective_intensity)
+    player.energy = max(0, player.energy - energy_drain)
+    session.add(player)  # make sure energy change is saved later
+
     # ✅ 4. Split XP across stats
     xp_split = split_xp_among_stats(total_xp, drill["affected_stats"])
 
@@ -229,6 +252,11 @@ def apply_training_with_injury_check(player: Player, drill: Dict, session: Sessi
                        else "skipped" if active_injury and active_injury.days_remaining > active_injury.rehab_start 
                        else "normal",
         "xp_applied": round(total_xp, 2),
+        "training_intensity_used": effective_intensity,
+        "energy_before": energy_before,
+        "energy_after": player.energy,
+        "energy_drain": energy_drain,
+
         "updated_stats": updated_stats,
         "notes": f"Injury: {active_injury.name} (rehab phase)" if active_injury and active_injury.days_remaining <= active_injury.rehab_start 
                  else f"Injury: {active_injury.name} (fully out)" if active_injury 

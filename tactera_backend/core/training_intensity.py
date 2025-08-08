@@ -37,7 +37,7 @@ def get_xp_multiplier(intensity: str) -> float:
     return XP_MULTIPLIER.get(intensity, 1.0)
 
 
-def compute_energy_drain(
+def calculate_energy_drain(
     intensity: str,
     physio_staff_level: int = 0,
     physio_facility_level: int = 0,
