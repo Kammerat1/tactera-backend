@@ -13,6 +13,8 @@ class Club(SQLModel, table=True):
     league_id: Optional[int] = Field(default=None, foreign_key="league.id")
     trainingground_id: Optional[int] = Field(default=None, foreign_key="trainingground.id")
     last_training_date: Optional[date] = Field(default=None, nullable=True)
+        # Training intensity setting for this club (light|normal|hard)
+    training_intensity: str = Field(default="normal")
 
     squad: List["Player"] = Relationship(back_populates="club")
     manager: Optional["Manager"] = Relationship(back_populates="club")
