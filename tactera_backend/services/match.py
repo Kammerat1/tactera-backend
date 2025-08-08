@@ -143,6 +143,17 @@ def simulate_match(home_email: str, away_email: str, session: Session = Depends(
     - Stat-based simulation for shots and goals.
     """
 
+    # ---------------------------------------------
+    # 🩺 Debug collector: per-player injury risk info
+    # This list will collect dictionaries describing:
+    # - player identity
+    # - base risk before multipliers
+    # - total multiplier applied
+    # - final risk after multipliers
+    # - reason flags (rehab / recently_healed / low_energy)
+    # ---------------------------------------------
+    injury_risk_debug = []
+
     # 1️⃣ Fetch clubs
     home_club = session.exec(select(Club).where(Club.manager_email == home_email)).first()
     away_club = session.exec(select(Club).where(Club.manager_email == away_email)).first()
@@ -221,6 +232,62 @@ def simulate_match(home_email: str, away_email: str, session: Session = Depends(
 
         if TEST_MODE:
             print(f"[DEBUG] Injury Roll: {player.first_name} {player.last_name} - Final Risk {risk:.2%}")
+
+        # ---------------------------------------------
+        # 🩺 Compute total reinjury multiplier & capture reasons
+        # We call our helper once to get the final multiplier.
+        # Then we also collect human-readable reasons to make it clear
+        # why the multiplier was > 1.0
+        # ---------------------------------------------
+        multiplier = calculate_reinjury_risk_multiplier(player, session)
+        final_risk = risk * multiplier
+
+        # Collect reason flags (best-effort; keep it light and non-blocking)
+        reason_flags = []
+        try:
+            # Low energy
+            if hasattr(player, "energy") and player.energy < LOW_ENERGY_THRESHOLD:
+                reason_flags.append("low_energy")
+
+            # Active rehab check (days_remaining <= rehab_start)
+            rehab_row = session.exec(
+                select(Injury)
+                .where(Injury.player_id == player.id, Injury.days_remaining > 0)
+                .order_by(Injury.start_date.desc())
+            ).first()
+            if rehab_row and rehab_row.days_remaining <= rehab_row.rehab_start:
+                reason_flags.append("rehab")
+
+            # Recently healed check (start_date + days_total within window)
+            last_row = session.exec(
+                select(Injury)
+                .where(Injury.player_id == player.id)
+                .order_by(Injury.start_date.desc())
+            ).first()
+            if last_row and last_row.start_date and last_row.days_total:
+                healed_date = (last_row.start_date.date()
+                            if hasattr(last_row.start_date, "date")
+                            else last_row.start_date) + timedelta(days=last_row.days_total)
+                if healed_date < datetime.utcnow().date():
+                    days_since = (datetime.utcnow().date() - healed_date).days
+                    if days_since <= RECENT_HEALED_WINDOW_DAYS:
+                        reason_flags.append("recently_healed")
+        except Exception:
+            # Debug should never break the sim
+            pass
+
+        # Store one debug entry for this player
+        injury_risk_debug.append({
+            "player": f"{player.first_name} {player.last_name}",
+            "base_risk": round(risk, 6),
+            "multiplier": round(multiplier, 6),
+            "final_risk": round(final_risk, 6),
+            "reasons": reason_flags,
+        })
+
+        # From here on, use final_risk for the roll
+        risk = final_risk
+
 
         # Roll injury
         if random.random() < risk:
@@ -308,7 +375,9 @@ def simulate_match(home_email: str, away_email: str, session: Session = Depends(
         "reinjury_count": reinjuries,            # Total aggravated injuries
         "new_injury_count": new_injuries,        # Total fresh injuries
         "home_injuries": home_injuries,          # Injuries for home team only
-        "away_injuries": away_injuries           # Injuries for away team only
+        "away_injuries": away_injuries,           # Injuries for away team only
+        "injury_risk_debug": injury_risk_debug
+
     }
 
 
