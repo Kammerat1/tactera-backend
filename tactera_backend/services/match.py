@@ -36,48 +36,102 @@ from tactera_backend.core.injury_config import (
     LOW_ENERGY_MAX_MULTIPLIER
 )
 
+# ============================
+# 📌 Reinjury Risk Multiplier
+# ============================
+# This helper adjusts injury probability during matches based on:
+# 1) Active rehab phase (days_remaining <= rehab_start)
+# 2) Recently healed window (start_date + days_total within X days of today)
+# 3) Low energy scaling (below a threshold, risk rises toward a max multiplier)
+
+from tactera_backend.models.injury_model import Injury
+from tactera_backend.core.injury_config import (
+    REHAB_INJURY_MULTIPLIER,
+    RECENT_HEALED_WINDOW_DAYS,
+    RECENT_HEALED_MULTIPLIER,
+    LOW_ENERGY_THRESHOLD,
+    LOW_ENERGY_MAX_MULTIPLIER
+)
+
 def calculate_reinjury_risk_multiplier(player, session) -> float:
     """
     Calculate a risk multiplier for a player's injury chance in a match.
 
+    Rules:
+    - If the player has an active injury and is in rehab, apply REHAB_INJURY_MULTIPLIER.
+    - If the player's most recent injury healed within RECENT_HEALED_WINDOW_DAYS,
+      apply RECENT_HEALED_MULTIPLIER.
+    - If the player's energy is below LOW_ENERGY_THRESHOLD, scale risk up smoothly
+      until LOW_ENERGY_MAX_MULTIPLIER at 0 energy.
+
     Args:
-        player: Player object (must have energy and id attributes).
-        session: DB session for querying injury history.
+        player: Player object with at least .id and .energy.
+        session: SQLModel session for DB access.
 
     Returns:
         float: Multiplier to apply to base injury probability.
     """
     multiplier = 1.0
 
-    # 1️⃣ Check for active injury (rehab phase)
-    active_injury = session.exec(
-        select(Injury).where(Injury.player_id == player.id).order_by(Injury.start_date.desc())
-    ).first()
-    if active_injury:
-        # If days remaining is within rehab phase, apply rehab multiplier
-        if active_injury.days_remaining <= active_injury.rehab_start:
-            multiplier *= REHAB_INJURY_MULTIPLIER
+    # Get today's date for healed window calculations
+    today = datetime.utcnow().date()
 
-    # 2️⃣ Check for recently healed injuries
+    # 1) ACTIVE REHAB CHECK
+    #    We consider an "active injury" as days_remaining > 0.
+    #    Rehab phase starts when days_remaining <= rehab_start.
+    active_injury = session.exec(
+        select(Injury)
+        .where(Injury.player_id == player.id, Injury.days_remaining > 0)
+        .order_by(Injury.start_date.desc())
+    ).first()
+
+    if active_injury:
+        # Player is still injured — check if they are in the rehab segment
+        try:
+            if active_injury.days_remaining <= active_injury.rehab_start:
+                multiplier *= REHAB_INJURY_MULTIPLIER
+        except Exception:
+            # Be defensive if fields are missing/None; fail closed (no rehab bump)
+            pass
+
+    # 2) RECENTLY HEALED CHECK
+    #    If there is no active injury, find the most recent injury and
+    #    compute healed_date = start_date + days_total. If healed_date is
+    #    within RECENT_HEALED_WINDOW_DAYS days before today, apply multiplier.
     if not active_injury:
         last_injury = session.exec(
-            select(Injury).where(Injury.player_id == player.id).order_by(Injury.end_date.desc())
+            select(Injury)
+            .where(Injury.player_id == player.id)
+            .order_by(Injury.start_date.desc())
         ).first()
-        if last_injury and last_injury.end_date:
-            days_since_healed = (date.today() - last_injury.end_date).days
-            if days_since_healed <= RECENT_HEALED_WINDOW_DAYS:
-                multiplier *= RECENT_HEALED_MULTIPLIER
 
-    # 3️⃣ Low energy scaling
-    if player.energy < LOW_ENERGY_THRESHOLD:
-        # Scale between 1.0 and LOW_ENERGY_MAX_MULTIPLIER based on how low the energy is
-        energy_ratio = max(0, player.energy) / LOW_ENERGY_THRESHOLD
-        low_energy_factor = 1.0 + (LOW_ENERGY_MAX_MULTIPLIER - 1.0) * (1 - energy_ratio)
-        multiplier *= low_energy_factor
+        if last_injury and last_injury.start_date and last_injury.days_total:
+            try:
+                healed_date = (last_injury.start_date.date()
+                               if hasattr(last_injury.start_date, "date")
+                               else last_injury.start_date) + timedelta(days=last_injury.days_total)
+                if healed_date < today:
+                    days_since_healed = (today - healed_date).days
+                    if days_since_healed <= RECENT_HEALED_WINDOW_DAYS:
+                        multiplier *= RECENT_HEALED_MULTIPLIER
+            except Exception:
+                # If anything odd with date math, skip "recently healed" bump safely
+                pass
+
+    # 3) LOW ENERGY SCALING
+    #    Below LOW_ENERGY_THRESHOLD, scale from 1.0 (at threshold) to
+    #    LOW_ENERGY_MAX_MULTIPLIER (at 0 energy).
+    try:
+        if player.energy < LOW_ENERGY_THRESHOLD:
+            safe_energy = max(0, int(player.energy))
+            energy_ratio = safe_energy / float(LOW_ENERGY_THRESHOLD)
+            low_energy_factor = 1.0 + (LOW_ENERGY_MAX_MULTIPLIER - 1.0) * (1.0 - energy_ratio)
+            multiplier *= low_energy_factor
+    except Exception:
+        # If energy is missing/bad, don't apply the low energy factor
+        pass
 
     return multiplier
-
-
 
 @router.post("/simulate")
 def simulate_match(home_email: str, away_email: str, session: Session = Depends(get_session)):
@@ -164,7 +218,6 @@ def simulate_match(home_email: str, away_email: str, session: Session = Depends(
         risk *= calculate_reinjury_risk_multiplier(player, session)
         if TEST_MODE:
             print(f"   🩺 Adjusted Injury Risk: {player.first_name} {player.last_name} (x{risk/base_risk:.2f})")
-
 
         if TEST_MODE:
             print(f"[DEBUG] Injury Roll: {player.first_name} {player.last_name} - Final Risk {risk:.2%}")
