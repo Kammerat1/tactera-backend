@@ -115,7 +115,6 @@ def calculate_training_xp(
     training_ground_boost: int
 ) -> float:
     
-
     """
     Calculate the total XP a player earns in a training session.
 
@@ -142,18 +141,31 @@ def calculate_training_xp(
 
 def split_xp_among_stats(total_xp: float, stat_list: List[str]) -> Dict[str, float]:
     """
-    Splits total XP among stats with +/- 20% random variation.
-    Returns a dict: {stat_name: xp}
+    Split an already-computed TOTAL XP across the given stats using weighted variation.
+    This function must NOT depend on intensity or base_xp. It only divides total_xp.
     """
-    base_xp = total_xp / len(stat_list)
-    stat_xp = {}
+    if not stat_list:
+        return {}
 
-    for stat in stat_list:
-        variation = random.uniform(0.8, 1.2)  # +/-20%
-        xp = round(base_xp * variation, 2)
-        stat_xp[stat] = xp
+    # Random weights per stat (±20% effect)
+    weights = [random.uniform(0.8, 1.2) for _ in stat_list]
+    weight_sum = sum(weights) if weights else 1.0
 
-    return stat_xp
+    # Proportional allocation
+    split: Dict[str, float] = {}
+    for stat, w in zip(stat_list, weights):
+        portion = (w / weight_sum) if weight_sum > 0 else (1.0 / len(stat_list))
+        xp = round(total_xp * portion, 2)
+        split[stat] = xp
+
+    # Fix rounding so totals match exactly
+    diff = round(total_xp - sum(split.values()), 2)
+    if diff != 0:
+        last_stat = stat_list[-1]
+        split[last_stat] = round(split[last_stat] + diff, 2)
+
+    return split
+
 
 
 # training.py (continued)
@@ -215,25 +227,27 @@ def apply_training_with_injury_check(player: Player, drill: Dict, session: Sessi
     total_xp *= rehab_penalty
 
     # --- INTENSITY APPLICATION (XP + ENERGY) ---
-    # Determine the club's chosen intensity, defaulting to "normal"
+    # Import at top of file (ensure this exists):
+    # from tactera_backend.core.training_intensity import get_xp_multiplier, calculate_energy_drain
+
     club_intensity = (player.club.training_intensity if player and player.club else "normal").lower()
 
-    # If the player is in rehab (allowed training), force light intensity for safety.
+    # If in rehab phase, force light intensity for safety
     effective_intensity = club_intensity
-    if active_injury:
-        # If the player is in the rehab phase, we force light.
-        if active_injury.days_remaining <= active_injury.rehab_start:
-            effective_intensity = "light"
+    if active_injury and active_injury.days_remaining <= active_injury.rehab_start:
+        effective_intensity = "light"
 
-    # Apply XP multiplier to the already computed base_xp
+    # Apply XP multiplier to the TOTAL XP (not inside split)
     xp_mult = get_xp_multiplier(effective_intensity)
-    base_xp = base_xp * xp_mult  # base_xp exists earlier in this function
+    total_xp *= xp_mult
 
-    # Apply energy drain and persist
+    # Apply energy drain
     energy_before = player.energy
     energy_drain = calculate_energy_drain(effective_intensity)
     player.energy = max(0, player.energy - energy_drain)
-    session.add(player)  # make sure energy change is saved later
+    session.add(player)  # persist later with commit
+
+
 
     # ✅ 4. Split XP across stats
     xp_split = split_xp_among_stats(total_xp, drill["affected_stats"])
