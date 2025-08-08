@@ -49,3 +49,22 @@ INJURY_SEVERITY_WEIGHTS = {
 # 🔁 Reinjury risk multiplier (applied during rehab-phase matches)
 REINJURY_MULTIPLIER = 1.5  # Default: 50% higher risk when playing in rehab
 
+# ============================
+# 📌 REINJURY RISK CONSTANTS
+# ============================
+# These values control how injury chances are increased for
+# players who are fatigued, in rehab, or recently healed.
+
+# Multiplier if player is in rehab (still recovering from injury)
+REHAB_INJURY_MULTIPLIER = 2.0  # doubles the base injury chance
+
+# If a player has just healed from injury, we treat them as "recently healed"
+# for this many in-game days, giving them a slightly higher risk.
+RECENT_HEALED_WINDOW_DAYS = 7
+RECENT_HEALED_MULTIPLIER = 1.5  # 50% higher risk
+
+# Players with low energy are more prone to injury.
+# Below this threshold, risk increases gradually until it reaches
+# LOW_ENERGY_MAX_MULTIPLIER at 0 energy.
+LOW_ENERGY_THRESHOLD = 50
+LOW_ENERGY_MAX_MULTIPLIER = 2.0  # 100% more risk at 0 energy
