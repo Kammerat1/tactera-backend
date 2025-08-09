@@ -13,6 +13,7 @@ from tactera_backend.models.injury_model import Injury
 from tactera_backend.core.injury_generator import calculate_injury_risk, generate_injury
 from tactera_backend.core.injury_config import REINJURY_MULTIPLIER
 from tactera_backend.core.config import TEST_MODE  # ✅ Ensure TEST_MODE is imported
+from tactera_backend.models.suspension_model import Suspension
 
 
 
@@ -156,6 +157,18 @@ async def simulate_match(db: AsyncSession, fixture_id: int):
     # Final commit of injury updates
     await db.commit()
     
+        # 👇 NEW: After writing the match result, decrement suspensions for both clubs
+    try:
+        await decrement_suspensions_after_match(
+            db,
+            home_club_id=fixture.home_club_id,
+            away_club_id=fixture.away_club_id
+        )
+    except Exception as e:
+        # Don't crash the match flow on suspension update — just log
+        print(f"[WARN] Failed to decrement suspensions after match {fixture_id}: {e}")
+
+    
     if TEST_MODE:
         total_injuries = len(injuries)
         reinjury_count = sum(1 for inj in injuries if inj["reinjury"])
@@ -173,3 +186,43 @@ async def simulate_match(db: AsyncSession, fixture_id: int):
         "played_at": fixture.match_time,
         "injuries": injuries  # For debugging
     }
+    
+    # ------------------------------------------------------------
+# Suspension countdown per match
+# ------------------------------------------------------------
+async def decrement_suspensions_after_match(db: AsyncSession, home_club_id: int, away_club_id: int) -> None:
+    """
+    Decrements matches_remaining for all players with active suspensions
+    in either the home or away club for the just-played match.
+    - If matches_remaining > 0, reduce by 1.
+    - Leaves entries at 0 (we don't delete; availability logic checks > 0).
+    """
+
+    # 1) Find all Suspension rows for players in either club with matches_remaining > 0
+    stmt = (
+        select(Suspension)
+        .join(Player, Player.id == Suspension.player_id)
+        .where(
+            Player.club_id.in_([home_club_id, away_club_id]),
+            Suspension.matches_remaining > 0
+        )
+    )
+    result = await db.execute(stmt)
+    suspensions = result.scalars().all()
+
+    # 2) Decrement each and stage for commit
+    for sus in suspensions:
+        # Safety clamp: never go below 0
+        sus.matches_remaining = max(0, sus.matches_remaining - 1)
+        # Optional: update timestamp if you track it
+        try:
+            from datetime import datetime
+            sus.updated_at = datetime.utcnow()
+        except Exception:
+            pass
+        db.add(sus)
+
+    # 3) Commit once
+    if suspensions:
+        await db.commit()
+

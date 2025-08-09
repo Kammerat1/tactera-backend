@@ -414,12 +414,17 @@ def get_fixture_availability(fixture_id: int, session: Session = Depends(get_ses
 
     def serialize_player(p: Player) -> dict:
         """
-        Converts a Player row into a minimal dict for the UI with availability_status.
-        Includes an active_injury summary if applicable.
+        Converts a Player row into a minimal dict for the UI with availability info.
+        Adds:
+        - availability_status: "injured" | "rehab" | "tired" | "suspended" | "ok"
+        - active_injury:   small summary if present (or None)
+        - active_suspension: small summary if present (or None)
         """
+        # Derive the status using our helper (suspension has highest priority)
         status = compute_player_availability(p)
-        active_injury = get_active_injury(p)
 
+        # Build a minimal injury summary if applicable
+        active_injury = get_active_injury(p)
         injury_summary = None
         if active_injury:
             injury_summary = {
@@ -430,6 +435,16 @@ def get_fixture_availability(fixture_id: int, session: Session = Depends(get_ses
                 "days_total": active_injury.days_total,
             }
 
+        # ✅ NEW: Build a minimal suspension summary if applicable
+        active_suspension = get_active_suspension(p)
+        suspension_summary = None
+        if active_suspension:
+            suspension_summary = {
+                "reason": active_suspension.reason,
+                "matches_remaining": active_suspension.matches_remaining,
+            }
+
+        # Return a compact, UI-friendly dict
         return {
             "id": p.id,
             "first_name": p.first_name,
@@ -437,8 +452,10 @@ def get_fixture_availability(fixture_id: int, session: Session = Depends(get_ses
             "position": p.position,
             "energy": p.energy,
             "availability_status": status,
-            "active_injury": injury_summary,
+            "active_injury": injury_summary,          # None if healthy
+            "active_suspension": suspension_summary,  # None if not suspended
         }
+
 
     # 4) Build response
     return {
