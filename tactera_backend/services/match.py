@@ -8,6 +8,7 @@ import random
 from tactera_backend.models.player_stat_model import PlayerStat
 from datetime import datetime, timedelta, timezone, date
 from typing import List
+from tactera_backend.models.suspension_model import Suspension
 
 # --- Injury imports ---
 from tactera_backend.core.injury_generator import calculate_injury_risk, generate_injury
@@ -132,6 +133,118 @@ def calculate_reinjury_risk_multiplier(player, session) -> float:
         pass
 
     return multiplier
+
+# =========================================
+# 🟨🟥 Booking & Suspension Configuration
+# =========================================
+YELLOW_CARDS_MIN = 0
+YELLOW_CARDS_MAX = 4
+DIRECT_RED_PROB = 0.10        # 10% chance a team gets a direct red
+RED_SUSPENSION_MIN = 1
+RED_SUSPENSION_MAX = 3
+TWO_YELLOWS_SUSPENSION = 1    # two yellows in SAME match => 1 match ban
+
+
+# ---------------------------------------------
+# Helper: add/update a suspension (SYNC session)
+# ---------------------------------------------
+def create_or_update_suspension_sync(session: Session, player_id: int, matches: int, reason: str):
+    """
+    Creates or updates a player's suspension.
+    If a Suspension exists, ADD to matches_remaining. Otherwise create a new one.
+    """
+    existing = session.exec(select(Suspension).where(Suspension.player_id == player_id)).first()
+    if existing:
+        existing.matches_remaining = max(0, existing.matches_remaining) + max(0, matches)
+        existing.reason = reason
+        existing.updated_at = datetime.utcnow()
+        session.add(existing)
+    else:
+        sus = Suspension(
+            player_id=player_id,
+            reason=reason,
+            matches_remaining=max(0, matches)
+        )
+        session.add(sus)
+    session.commit()
+
+
+# ----------------------------------------------------
+# Helper: randomly generate bookings for a team squad
+# ----------------------------------------------------
+def generate_team_bookings(player_ids: list[int]) -> dict:
+    """
+    Returns per-team bookings for one match:
+    {
+      "yellow_counts": {player_id: n_yellows_this_match, ...},
+      "direct_reds": [player_id, ...]
+    }
+    """
+    if not player_ids:
+        return {"yellow_counts": {}, "direct_reds": []}
+
+    num_yellows = random.randint(YELLOW_CARDS_MIN, YELLOW_CARDS_MAX)
+    yellow_counts = {}
+    for _ in range(num_yellows):
+        pid = random.choice(player_ids)
+        yellow_counts[pid] = yellow_counts.get(pid, 0) + 1
+
+    direct_reds = []
+    if random.random() < DIRECT_RED_PROB:
+        direct_reds.append(random.choice(player_ids))
+
+    return {"yellow_counts": yellow_counts, "direct_reds": direct_reds}
+
+
+# ---------------------------------------------------------
+# Helper: assemble a bookings payload for API visibility
+# ---------------------------------------------------------
+def build_bookings_payload(home_data: dict, away_data: dict) -> dict:
+    """
+    Converts internal bookings into a simple API payload:
+    {
+      "home": [{"player_id": 1, "type": "yellow"}, ...],
+      "away": [{"player_id": 9, "type": "red"}, {"player_id": 5, "type": "second_yellow_red"}]
+    }
+    """
+    def expand(side_dict):
+        events = []
+        for pid, cnt in side_dict["yellow_counts"].items():
+            for _ in range(min(cnt, 2)):
+                events.append({"player_id": pid, "type": "yellow"})
+            if cnt >= 2:
+                events.append({"player_id": pid, "type": "second_yellow_red"})
+        for pid in side_dict["direct_reds"]:
+            events.append({"player_id": pid, "type": "red"})
+        return events
+
+    return {"home": expand(home_data), "away": expand(away_data)}
+
+
+# ------------------------------------------------------------
+# Helper: decrement suspensions for both clubs after the match
+# ------------------------------------------------------------
+def decrement_suspensions_after_match_sync(session: Session, home_club_id: int, away_club_id: int) -> None:
+    """
+    For all players in the two clubs with matches_remaining > 0,
+    decrement by 1 (never below 0).
+    """
+    suspensions = session.exec(
+        select(Suspension)
+        .join(Player, Player.id == Suspension.player_id)
+        .where(Player.club_id.in_([home_club_id, away_club_id]), Suspension.matches_remaining > 0)
+    ).all()
+
+    changed = False
+    for sus in suspensions:
+        sus.matches_remaining = max(0, sus.matches_remaining - 1)
+        sus.updated_at = datetime.utcnow()
+        session.add(sus)
+        changed = True
+
+    if changed:
+        session.commit()
+
 
 @router.post("/simulate")
 def simulate_match(home_email: str, away_email: str, session: Session = Depends(get_session)):
@@ -275,6 +388,46 @@ def simulate_match(home_email: str, away_email: str, session: Session = Depends(
         except Exception:
             # Debug should never break the sim
             pass
+        
+                # =========================================
+            # 🟨🟥 Generate bookings and create suspensions
+            # =========================================
+            # Ensure you have the lists of Player objects for each club
+            home_player_ids = [p.id for p in home_players]
+            away_player_ids = [p.id for p in away_players]
+
+            # 1) Generate bookings
+            home_book = generate_team_bookings(home_player_ids)
+            away_book = generate_team_bookings(away_player_ids)
+
+            # 2) Auto-suspensions
+            # Two yellows in SAME match => 1 match ban
+            for pid, cnt in home_book["yellow_counts"].items():
+                if cnt >= 2:
+                    create_or_update_suspension_sync(session, pid, TWO_YELLOWS_SUSPENSION, reason="two_yellows")
+            for pid, cnt in away_book["yellow_counts"].items():
+                if cnt >= 2:
+                    create_or_update_suspension_sync(session, pid, TWO_YELLOWS_SUSPENSION, reason="two_yellows")
+
+            # Direct red => randomized suspension length
+            for pid in home_book["direct_reds"]:
+                red_len = random.randint(RED_SUSPENSION_MIN, RED_SUSPENSION_MAX)
+                create_or_update_suspension_sync(session, pid, red_len, reason="red_card")
+            for pid in away_book["direct_reds"]:
+                red_len = random.randint(RED_SUSPENSION_MIN, RED_SUSPENSION_MAX)
+                create_or_update_suspension_sync(session, pid, red_len, reason="red_card")
+
+            # 3) Build bookings payload and attach to result
+            bookings_payload = build_bookings_payload(home_book, away_book)
+
+            # 4) After registering suspensions for this match, decrement all active suspensions by 1
+            #    for both clubs so they tick down per match.
+            decrement_suspensions_after_match_sync(session, home_club.id, away_club.id)
+
+            # If your function builds a 'result' dict, attach it:
+            # result["bookings"] = bookings_payload
+            # If you return a dict inline, add `"bookings": bookings_payload` to it.
+
 
         # Store one debug entry for this player
         injury_risk_debug.append({

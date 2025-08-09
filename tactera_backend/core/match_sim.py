@@ -15,6 +15,117 @@ from tactera_backend.core.injury_config import REINJURY_MULTIPLIER
 from tactera_backend.core.config import TEST_MODE  # ✅ Ensure TEST_MODE is imported
 from tactera_backend.models.suspension_model import Suspension
 
+# =========================================
+# 🟨🟥 Booking & Suspension Configuration
+# =========================================
+# You can tweak these to adjust how often cards happen.
+# All values are per-team, per-match "guidelines" used by the generator.
+
+# Approximate target ranges per team
+YELLOW_CARDS_MIN = 0
+YELLOW_CARDS_MAX = 4
+
+# Probability a team also gets a direct red (independent of yellows)
+DIRECT_RED_PROB = 0.10   # 10%
+
+# Direct red suspension length (randomized between these)
+RED_SUSPENSION_MIN = 1   # at least 1 match
+RED_SUSPENSION_MAX = 3   # up to 3 matches
+
+# Accumulation rule: two yellows in the SAME match = 1 match suspension
+TWO_YELLOWS_SUSPENSION = 1
+
+
+# ---------------------------------------------
+# Helper: add/update a suspension for a player
+# ---------------------------------------------
+async def create_or_update_suspension(db, player_id: int, matches: int, reason: str):
+    """
+    Creates a new Suspension or adds matches onto an existing one.
+    - If there's any existing Suspension row for this player, we ADD to matches_remaining.
+    - Otherwise, we create a fresh suspension.
+    """
+    # Find any suspension rows for this player
+    result = await db.execute(
+        select(Suspension).where(Suspension.player_id == player_id)
+    )
+    existing = result.scalars().first()
+
+    if existing:
+        existing.matches_remaining = max(0, existing.matches_remaining) + max(0, matches)
+        existing.reason = reason  # keep latest reason; you can concatenate if desired
+        existing.updated_at = datetime.utcnow()
+        db.add(existing)
+    else:
+        sus = Suspension(
+            player_id=player_id,
+            reason=reason,
+            matches_remaining=max(0, matches),
+        )
+        db.add(sus)
+
+    await db.commit()
+
+
+# ----------------------------------------------------
+# Helper: randomly generate bookings for a team squad
+# ----------------------------------------------------
+def generate_team_bookings(player_ids: list[int]) -> dict:
+    """
+    Returns a dict with per-player bookings for one team:
+    {
+      "yellow_counts": {player_id: n_yellows_this_match, ...},
+      "direct_reds": [player_id, ...]
+    }
+    """
+    if not player_ids:
+        return {"yellow_counts": {}, "direct_reds": []}
+
+    # How many yellows shall we give this team?
+    num_yellows = random.randint(YELLOW_CARDS_MIN, YELLOW_CARDS_MAX)
+
+    yellow_counts = {}
+    for _ in range(num_yellows):
+        pid = random.choice(player_ids)
+        yellow_counts[pid] = yellow_counts.get(pid, 0) + 1
+
+    # Maybe a direct red (independent of the yellows)
+    direct_reds = []
+    if random.random() < DIRECT_RED_PROB:
+        pid = random.choice(player_ids)
+        direct_reds.append(pid)
+
+    return {"yellow_counts": yellow_counts, "direct_reds": direct_reds}
+
+
+# ---------------------------------------------------------
+# Helper: assemble a bookings payload for API visibility
+# ---------------------------------------------------------
+def build_bookings_payload(home_data: dict, away_data: dict) -> dict:
+    """
+    Converts the internal booking dicts into a UI-friendly structure:
+    {
+      "home": [{"player_id": 1, "type": "yellow"}, ...],
+      "away": [{"player_id": 9, "type": "red"}, {"player_id": 5, "type": "second_yellow_red"}]
+    }
+    """
+    def expand(side_dict):
+        events = []
+        # Yellows
+        for pid, cnt in side_dict["yellow_counts"].items():
+            for _ in range(min(cnt, 2)):  # list each yellow separately (cap at 2 for readability)
+                events.append({"player_id": pid, "type": "yellow"})
+            if cnt >= 2:
+                events.append({"player_id": pid, "type": "second_yellow_red"})
+        # Direct reds
+        for pid in side_dict["direct_reds"]:
+            events.append({"player_id": pid, "type": "red"})
+        return events
+
+    return {
+        "home": expand(home_data),
+        "away": expand(away_data),
+    }
 
 
 async def simulate_match(db: AsyncSession, fixture_id: int):
@@ -52,6 +163,43 @@ async def simulate_match(db: AsyncSession, fixture_id: int):
         )
     )
     away_players = away_players_result.scalars().all()
+    
+        # =========================================
+    # 🟨🟥 Generate bookings and create suspensions
+    # =========================================
+    # Collect player ids for each side
+    home_player_ids = [p.id for p in home_players]  # ensure you have these lists available
+    away_player_ids = [p.id for p in away_players]
+
+    # 1) Generate bookings independently for each team
+    home_book = generate_team_bookings(home_player_ids)
+    away_book = generate_team_bookings(away_player_ids)
+
+    # 2) Apply suspensions:
+    #    - Two yellows in SAME match = 1 match suspension
+    #    - Direct red = random 1..3 (configurable)
+    for pid, cnt in home_book["yellow_counts"].items():
+        if cnt >= 2:
+            await create_or_update_suspension(db, pid, TWO_YELLOWS_SUSPENSION, reason="two_yellows")
+    for pid, cnt in away_book["yellow_counts"].items():
+        if cnt >= 2:
+            await create_or_update_suspension(db, pid, TWO_YELLOWS_SUSPENSION, reason="two_yellows")
+
+    for pid in home_book["direct_reds"]:
+        red_len = random.randint(RED_SUSPENSION_MIN, RED_SUSPENSION_MAX)
+        await create_or_update_suspension(db, pid, red_len, reason="red_card")
+
+    for pid in away_book["direct_reds"]:
+        red_len = random.randint(RED_SUSPENSION_MIN, RED_SUSPENSION_MAX)
+        await create_or_update_suspension(db, pid, red_len, reason="red_card")
+
+    # 3) Build readable bookings payload for the API response
+    bookings_payload = build_bookings_payload(home_book, away_book)
+
+    # If you already build a 'result' dict, just attach:
+    # result["bookings"] = bookings_payload
+    # Otherwise, include 'bookings' in the return structure below.
+
 
     # 4️⃣ Stadium pitch quality
     stadium_result = await db.execute(select(Stadium).where(Stadium.club_id == home_club.id))
@@ -184,7 +332,9 @@ async def simulate_match(db: AsyncSession, fixture_id: int):
         "home_goals": home_goals,
         "away_goals": away_goals,
         "played_at": fixture.match_time,
-        "injuries": injuries  # For debugging
+        "injuries": injuries,  # For debugging,
+        "bookings": bookings_payload
+        
     }
     
     # ------------------------------------------------------------
