@@ -1,9 +1,3 @@
-# suspension_model.py
-# Defines the Suspension table and relationship to Player.
-# A Suspension represents a temporary ban from playing matches
-# (e.g., due to red cards or accumulated yellows).
-# We keep it simple: if matches_remaining > 0, the player is suspended.
-
 from typing import Optional
 from datetime import datetime
 from sqlmodel import SQLModel, Field, Relationship
@@ -18,6 +12,9 @@ class Suspension(SQLModel, table=True):
 
     # Countdown of matches for which the player is unavailable
     matches_remaining: int = Field(default=1, ge=0)
+    
+    # NEW: Track total matches for historical data
+    total_matches_suspended: int = Field(default=1, ge=1)
 
     # Optional metadata
     created_at: datetime = Field(default_factory=datetime.utcnow)
