@@ -3,6 +3,8 @@ from sqlmodel import SQLModel, Field, Relationship
 
 if TYPE_CHECKING:
     from .injury_model import Injury  # ✅ forward reference for Injury
+    from .suspension_model import Suspension  # ✅ forward reference for Suspension
+
 
 class Player(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -30,6 +32,11 @@ class Player(SQLModel, table=True):
 
     # ✅ NEW: Relationship to injuries
     injuries: List["Injury"] = Relationship(back_populates="player")
+    
+    # ✅ NEW: Relationship to suspensions
+    # A player can have zero or more Suspension entries.
+    # If any has matches_remaining > 0, the player is currently suspended.
+    suspensions: List["Suspension"] = Relationship(back_populates="player")
 
 
 # -------------------------------

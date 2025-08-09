@@ -175,3 +175,54 @@ def debug_force_reinjury_test(
         },
         "note": "Run /simulate with this club in a match. Check injury_risk_debug for multipliers and reasons.",
     }
+
+from pydantic import BaseModel
+from tactera_backend.models.player_model import Player
+from tactera_backend.models.suspension_model import Suspension
+from tactera_backend.core.database import get_session
+from sqlmodel import Session
+
+class SuspendRequest(BaseModel):
+    player_id: int
+    matches: int = 1
+    reason: str = "debug"
+
+@router.post("/debug/suspend-player")
+def debug_suspend_player(data: SuspendRequest, session: Session = Depends(get_session)):
+    """
+    DEBUG: Create or update a suspension for a player.
+    - If a Suspension exists, we set matches_remaining to 'matches'.
+    - Otherwise we create one.
+    """
+    player = session.get(Player, data.player_id)
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    # Check if there is an existing suspension entry; reuse or create
+    active = None
+    if player.suspensions:
+        for sus in player.suspensions:
+            # Reuse first entry (debug convenience)
+            active = sus
+            break
+
+    if active:
+        active.matches_remaining = data.matches
+        active.reason = data.reason
+    else:
+        active = Suspension(
+            player_id=player.id,
+            reason=data.reason,
+            matches_remaining=data.matches
+        )
+        session.add(active)
+
+    session.commit()
+    session.refresh(active)
+
+    return {
+        "message": "Suspension set",
+        "player_id": player.id,
+        "matches_remaining": active.matches_remaining,
+        "reason": active.reason
+    }

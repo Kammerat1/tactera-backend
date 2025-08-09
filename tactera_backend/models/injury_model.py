@@ -1,6 +1,8 @@
 from sqlmodel import SQLModel, Field, Relationship  # ✅ add Relationship here
 from typing import Optional, TYPE_CHECKING
 from datetime import datetime
+from tactera_backend.models.suspension_model import Suspension
+
 
 if TYPE_CHECKING:
     from .player_model import Player  # ✅ forward reference to avoid circular import

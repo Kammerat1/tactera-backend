@@ -11,6 +11,8 @@ from tactera_backend.core.match_sim import simulate_match
 from sqlalchemy.ext.asyncio import AsyncSession
 from tactera_backend.models.player_model import Player
 from tactera_backend.core.injury_config import LOW_ENERGY_THRESHOLD
+from tactera_backend.models.suspension_model import Suspension
+
 
 router = APIRouter()
 
@@ -28,28 +30,43 @@ def get_active_injury(player: Player):
                 return inj
     return None
 
+def get_active_suspension(player: Player):
+    """
+    Returns the first active suspension (matches_remaining > 0) for the player, if any.
+    Otherwise returns None.
+    """
+    if getattr(player, "suspensions", None):
+        for sus in player.suspensions:
+            if sus.matches_remaining and sus.matches_remaining > 0:
+                return sus
+    return None
 
 def compute_player_availability(player: Player) -> str:
     """
-    Derives a single availability status for a player:
-    - "injured": active injury and days_remaining > rehab_start
-    - "rehab":   active injury and 0 < days_remaining <= rehab_start
-    - "tired":   no active injury and energy < LOW_ENERGY_THRESHOLD
-    - "suspended": (not implemented yet) -> always "ok" for now
-    - "ok":      otherwise
+    Derives a single availability status for a player (priority order):
+    1) "suspended": has an active suspension (matches_remaining > 0)
+    2) "injured":   active injury with days_remaining > rehab_start
+    3) "rehab":     active injury with 0 < days_remaining <= rehab_start
+    4) "tired":     no injury/suspension and energy < LOW_ENERGY_THRESHOLD
+    5) "ok":        otherwise
     """
+    # 1) Suspension trumps everything else
+    if get_active_suspension(player):
+        return "suspended"
+
+    # 2) Injury checks
     active_injury = get_active_injury(player)
     if active_injury:
         if active_injury.days_remaining <= active_injury.rehab_start:
             return "rehab"
         return "injured"
 
+    # 3) Energy check
     if player.energy < LOW_ENERGY_THRESHOLD:
         return "tired"
 
-    # Suspensions not implemented yet
+    # 4) Default
     return "ok"
-
 
 # ---------------------------------------------
 # Availability helper for fixture list badges
@@ -79,7 +96,13 @@ def compute_availability_counts(session: Session, club_id: int) -> dict:
     for p in players:
         # Default assumption
         status = "ok"
-
+        
+                # Suspension first
+        if get_active_suspension(p):
+            status = "suspended"
+        else:
+            # (existing injury and energy logic remains)
+            ...
         # 1) Check for an active injury
         active_injury = None
         if getattr(p, "injuries", None):

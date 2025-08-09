@@ -32,3 +32,7 @@ from .country_model import Country
 
 # Stadium
 from .stadium_model import Stadium, StadiumPart
+
+# Suspension
+from .suspension_model import Suspension
+
