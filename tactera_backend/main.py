@@ -15,6 +15,7 @@ from tactera_backend.routes.league_routes import router as league_router
 from tactera_backend.services.training import router as training_router
 from tactera_backend.routes.stadium_routes import router as stadium_router
 from tactera_backend.routes.debug_routes import router as debug_router
+from tactera_backend.routes.formation_routes import router as formation_router
 
 app = FastAPI()
 
@@ -68,10 +69,11 @@ async def start_daily_tick_loop():
 
 # Routers
 app.include_router(auth_router, prefix="/auth", tags=["Auth"])
+app.include_router(league_router, prefix="/leagues", tags=["Leagues"])
 app.include_router(club_router, prefix="/clubs", tags=["Clubs"])
+app.include_router(stadium_router, prefix="/stadiums", tags=["Stadiums"])
+app.include_router(training_router, prefix="/training", tags=["Training"])
 app.include_router(player_router, prefix="/players", tags=["Players"])
 app.include_router(match_router, prefix="/matches", tags=["Matches"])
-app.include_router(league_router, prefix="/leagues", tags=["Leagues"])
-app.include_router(training_router, prefix="/training", tags=["Training"])
-app.include_router(stadium_router, prefix="/stadiums", tags=["Stadiums"])
+app.include_router(formation_router, prefix="/formations", tags=["Formations"])
 app.include_router(debug_router, tags=["Debug"])

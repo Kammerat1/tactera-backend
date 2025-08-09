@@ -10,6 +10,7 @@ from tactera_backend.seed.seed_player_stats import seed_player_stats
 from tactera_backend.seed.seed_xp_levels import seed_xp_levels
 from tactera_backend.seed.seed_season import seed_seasons
 from tactera_backend.services.generate_fixtures import generate_fixtures_for_league
+from tactera_backend.seed.seed_formations import seed_formation_templates
 
 from sqlmodel import Session
 from tactera_backend.core.database import sync_engine
@@ -39,10 +40,13 @@ def seed_all():
     print("➡️  Step 7: Seeding XP levels...")
     seed_xp_levels()
 
-    print("➡️  Step 8: Seeding seasons...")
+    print("➡️  Step 8: Seeding formation templates...")
+    seed_formation_templates()
+
+    print("➡️  Step 9: Seeding seasons...")
     seed_seasons()
 
-    print("➡️  Step 9: Generating fixtures for all leagues...")
+    print("➡️  Step 10: Generating fixtures for all leagues...")
     with Session(sync_engine) as session:
         leagues = session.query(League).all()
         for league in leagues:
