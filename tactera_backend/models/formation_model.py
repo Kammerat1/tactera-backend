@@ -103,3 +103,28 @@ class FormationUpdateRequest(BaseModel):
     captain_id: Optional[int] = None
     penalty_taker_id: Optional[int] = None
     free_kick_taker_id: Optional[int] = None
+    
+    # Add this new model after the existing ClubFormation class
+class MatchSquad(SQLModel, table=True):
+    """
+    Selected squad for a specific match (7-23 players).
+    This is separate from the formation which only handles starting XI.
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    match_id: int = Field(foreign_key="match.id")
+    club_id: int = Field(foreign_key="club.id")
+    
+    # JSON field storing selected player IDs for this match
+    # Example: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+    selected_players: List[int] = Field(sa_column=Column(JSON))
+    
+    # Starting XI from the match squad (exactly 11 player IDs)
+    starting_xi: List[int] = Field(sa_column=Column(JSON))
+    
+    # Substitution tracking
+    substitutions_made: int = Field(default=0)  # Count of substitution events (max 3)
+    players_substituted: int = Field(default=0)  # Count of players changed (max 5)
+    
+    # Match status
+    is_finalized: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=datetime.utcnow)

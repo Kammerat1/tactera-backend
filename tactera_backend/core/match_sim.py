@@ -98,12 +98,37 @@ def build_bookings_payload(home_data: dict, away_data: dict) -> dict:
         "away": expand(away_data),
     }
 
-async def get_club_starting_lineup(db: AsyncSession, club_id: int) -> dict:
+async def get_club_match_squad(db: AsyncSession, club_id: int, match_id: int = None) -> dict:
     """
-    Get a club's starting 11 based on their formation and player assignments.
-    Returns formation info and selected players.
+    Get a club's match squad (7-23 players) and starting XI (7-11 players).
+    Falls back to auto-selection if no manual selection exists.
     """
-    # Get the club's active formation
+    # Get all available players (exclude fully injured)
+    result = await db.execute(
+        select(Player).where(
+            Player.club_id == club_id,
+            ~Player.id.in_(select(Injury.player_id).where(Injury.days_remaining > 0))
+        )
+    )
+    available_players = result.scalars().all()
+    
+    # Check if we have enough players for minimum match squad
+    if len(available_players) < 7:
+        return {
+            "can_play": False,
+            "reason": "Insufficient players (need minimum 7)",
+            "available_count": len(available_players),
+            "match_squad": [],
+            "starting_xi": []
+        }
+    
+    # For now, auto-select match squad (we'll add manual selection later)
+    # Take up to 18 players for match squad (realistic for most clubs)
+    match_squad_size = min(18, len(available_players))
+    match_squad = available_players[:match_squad_size]
+    
+    # Select starting XI from match squad (7-11 players)
+    # Priority: use formation if available, otherwise auto-select
     result = await db.execute(
         select(ClubFormation).where(
             ClubFormation.club_id == club_id,
@@ -112,57 +137,58 @@ async def get_club_starting_lineup(db: AsyncSession, club_id: int) -> dict:
     )
     club_formation = result.scalar_one_or_none()
     
-    if not club_formation or not club_formation.player_assignments:
-        # No formation set - return empty
-        return {
-            "has_formation": False,
-            "formation_name": "No Formation Set",
-            "selected_players": [],
-            "tactics": {
-                "mentality": 5,
-                "pressing": 5,
-                "tempo": 5
+    if club_formation and club_formation.player_assignments:
+        # Use formation assignments for starting XI
+        assigned_player_ids = list(club_formation.player_assignments.values())
+        match_squad_ids = {p.id for p in match_squad}
+        
+        # Filter assigned players to only those in the match squad and available
+        valid_assignments = [pid for pid in assigned_player_ids if pid in match_squad_ids]
+        
+        # ✅ FLEXIBLE STARTING XI: Use what's assigned (7-11 players)
+        if len(valid_assignments) >= 7:
+            # Have enough assigned players - use them (even if less than 11)
+            starting_xi_ids = valid_assignments[:11]  # Cap at 11 maximum
+            starting_xi = [p for p in match_squad if p.id in starting_xi_ids]
+            formation_info = {
+                "has_formation": True,
+                "formation_name": "Formation Set",
+                "assigned_count": len(starting_xi),
+                "auto_filled": 0
             }
+        else:
+            # Not enough assigned players - fill up to reach minimum 7
+            unassigned = [p for p in match_squad if p.id not in valid_assignments]
+            needed = max(7, len(valid_assignments)) - len(valid_assignments)
+            
+            starting_xi_ids = valid_assignments + [p.id for p in unassigned[:needed]]
+            starting_xi = [p for p in match_squad if p.id in starting_xi_ids]
+            formation_info = {
+                "has_formation": True,
+                "formation_name": "Formation Set (Auto-filled)",
+                "assigned_count": len(valid_assignments),
+                "auto_filled": len(starting_xi) - len(valid_assignments)
+            }
+    else:
+        # No formation: auto-select optimal number (prefer 11, minimum 7)
+        optimal_starting = min(11, len(match_squad))
+        starting_xi = match_squad[:optimal_starting]
+        formation_info = {
+            "has_formation": False,
+            "formation_name": "Auto-Selected",
+            "assigned_count": 0,
+            "auto_filled": len(starting_xi)
         }
     
-    # Get formation template details
-    template = await db.get(FormationTemplate, club_formation.formation_template_id)
-    
-    # Get the assigned players
-    player_ids = list(club_formation.player_assignments.values())
-    if player_ids:
-        result = await db.execute(
-            select(Player).where(Player.id.in_(player_ids))
-        )
-        players = result.scalars().all()
-        player_dict = {p.id: p for p in players}
-        
-        selected_players = []
-        for position, player_id in club_formation.player_assignments.items():
-            if player_id in player_dict:
-                player = player_dict[player_id]
-                selected_players.append({
-                    "position": position,
-                    "player_id": player.id,
-                    "player": player,
-                    "role": template.positions.get(position, {}).get("role", "Unknown") if template else "Unknown"
-                })
-    else:
-        selected_players = []
-    
     return {
-        "has_formation": True,
-        "formation_name": template.name if template else "Unknown Formation",
-        "formation_template": template,
-        "selected_players": selected_players,
-        "tactics": {
-            "mentality": club_formation.mentality,
-            "pressing": club_formation.pressing,
-            "tempo": club_formation.tempo
-        },
-        "captain_id": club_formation.captain_id,
-        "penalty_taker_id": club_formation.penalty_taker_id,
-        "free_kick_taker_id": club_formation.free_kick_taker_id
+        "can_play": True,
+        "reason": "",
+        "available_count": len(available_players),
+        "match_squad": match_squad,
+        "match_squad_size": len(match_squad),
+        "starting_xi": starting_xi,
+        "starting_xi_count": len(starting_xi),  # ✅ Can be 7-11
+        "formation_info": formation_info
     }
     
 def validate_formation_for_match(lineup: dict) -> dict:
@@ -221,42 +247,65 @@ async def simulate_match(db: AsyncSession, fixture_id: int):
     home_club = await db.get(Club, fixture.home_club_id)
     away_club = await db.get(Club, fixture.away_club_id)
 
-    # 3️⃣ Fetch players using formation system
-    home_lineup = await get_club_starting_lineup(db, fixture.home_club_id)
-    away_lineup = await get_club_starting_lineup(db, fixture.away_club_id)
+    # 3️⃣ Fetch match squads and starting XIs
+    home_squad_info = await get_club_match_squad(db, fixture.home_club_id, fixture.id)
+    away_squad_info = await get_club_match_squad(db, fixture.away_club_id, fixture.id)
     
-    # Get players for the match (either from formation or all available)
-    if home_lineup["has_formation"] and home_lineup["selected_players"]:
-        home_players = [p["player"] for p in home_lineup["selected_players"]]
-        if TEST_MODE:
-            print(f"   🏟️ Home team using {home_lineup['formation_name']} formation with {len(home_players)} players")
-    else:
-        # Fallback: use all available players (exclude fully injured)
-        home_players_result = await db.execute(
-            select(Player).where(
-                Player.club_id == home_club.id,
-                ~Player.id.in_(select(Injury.player_id).where(Injury.days_remaining > 0))
-            )
-        )
-        home_players = home_players_result.scalars().all()
-        if TEST_MODE:
-            print(f"   ⚠️ Home team has no formation set, using all available players ({len(home_players)})")
+    # Check if both teams can field minimum squads
+    if not home_squad_info["can_play"]:
+        # Home team can't play - away team wins 3-0
+        fixture.home_goals = 0
+        fixture.away_goals = 3
+        fixture.is_played = True
+        fixture.match_time = datetime.utcnow()
+        await db.commit()
+        
+        return {
+            "fixture_id": fixture.id,
+            "match_abandoned": True,
+            "reason": f"Home team: {home_squad_info['reason']}",
+            "final_score": "0-3 (Walkover)",
+            "home_goals": 0,
+            "away_goals": 3,
+            "injuries": [],
+            "bookings": [],
+            "send_offs": []
+        }
     
-    if away_lineup["has_formation"] and away_lineup["selected_players"]:
-        away_players = [p["player"] for p in away_lineup["selected_players"]]
-        if TEST_MODE:
-            print(f"   🏟️ Away team using {away_lineup['formation_name']} formation with {len(away_players)} players")
-    else:
-        # Fallback: use all available players (exclude fully injured)
-        away_players_result = await db.execute(
-            select(Player).where(
-                Player.club_id == away_club.id,
-                ~Player.id.in_(select(Injury.player_id).where(Injury.days_remaining > 0))
-            )
-        )
-        away_players = away_players_result.scalars().all()
-        if TEST_MODE:
-            print(f"   ⚠️ Away team has no formation set, using all available players ({len(away_players)})")
+    if not away_squad_info["can_play"]:
+        # Away team can't play - home team wins 3-0
+        fixture.home_goals = 3
+        fixture.away_goals = 0
+        fixture.is_played = True
+        fixture.match_time = datetime.utcnow()
+        await db.commit()
+        
+        return {
+            "fixture_id": fixture.id,
+            "match_abandoned": True,
+            "reason": f"Away team: {away_squad_info['reason']}",
+            "final_score": "3-0 (Walkover)",
+            "home_goals": 3,
+            "away_goals": 0,
+            "injuries": [],
+            "bookings": [],
+            "send_offs": []
+        }
+    
+    # Both teams can play - get starting XIs
+    home_players = home_squad_info["starting_xi"]  # Exactly 11 players
+    away_players = away_squad_info["starting_xi"]  # Exactly 11 players
+    
+    if TEST_MODE:
+        print(f"\n🏁 Starting match simulation: {home_club.name} vs {away_club.name}")
+        print(f"   Home: {len(home_players)} starting players (squad: {home_squad_info['match_squad_size']})")
+        print(f"   Away: {len(away_players)} starting players (squad: {away_squad_info['match_squad_size']})")
+        
+        # Show if teams are playing with less than 11
+        if len(home_players) < 11:
+            print(f"   ⚠️ Home team starting with only {len(home_players)} players")
+        if len(away_players) < 11:
+            print(f"   ⚠️ Away team starting with only {len(away_players)} players")
 
     # 4️⃣ Stadium pitch quality
     stadium_result = await db.execute(select(Stadium).where(Stadium.club_id == home_club.id))
@@ -435,21 +484,26 @@ async def simulate_match(db: AsyncSession, fixture_id: int):
         "away_goals": away_goals,
         "played_at": fixture.match_time,
         "injuries": injuries,
-        "bookings": bookings_payload,  # Now includes minute stamps
-        "send_offs": send_offs,  # NEW: List of players sent off with minutes
+        "bookings": bookings_payload,
+        "send_offs": send_offs,
         
+        # NEW: Formation information with squad details
         "formations": {
             "home": {
-                "formation_name": home_lineup["formation_name"],
-                "has_formation": home_lineup["has_formation"],
-                "tactics": home_lineup["tactics"],
-                "players_used": len(home_players)
+                "formation_name": home_squad_info["formation_info"]["formation_name"],
+                "has_formation": home_squad_info["formation_info"]["has_formation"],
+                "starting_players": len(home_players),  # ✅ Shows actual count (7-11)
+                "match_squad_size": home_squad_info["match_squad_size"],
+                "assigned_count": home_squad_info["formation_info"]["assigned_count"],
+                "auto_filled": home_squad_info["formation_info"]["auto_filled"]
             },
             "away": {
-                "formation_name": away_lineup["formation_name"],
-                "has_formation": away_lineup["has_formation"],
-                "tactics": away_lineup["tactics"],
-                "players_used": len(away_players)
+                "formation_name": away_squad_info["formation_info"]["formation_name"],
+                "has_formation": away_squad_info["formation_info"]["has_formation"],
+                "starting_players": len(away_players),  # ✅ Shows actual count (7-11)
+                "match_squad_size": away_squad_info["match_squad_size"],
+                "assigned_count": away_squad_info["formation_info"]["assigned_count"],
+                "auto_filled": away_squad_info["formation_info"]["auto_filled"]
             }
         }
     }
@@ -460,41 +514,68 @@ async def simulate_match(db: AsyncSession, fixture_id: int):
 # =========================================
 async def simulate_minute_based_events_async(home_players, away_players) -> dict:
     """
-    Async version of minute-by-minute events during a match.
-    Returns:
-    - Goals for each team
-    - Bookings with minute stamps
-    - Players sent off (and when)
-    - Active players remaining at match end
+    Simulates minute-by-minute events with proper 7-player rule enforcement.
     """
     from typing import Set
     
-    # Track which players are still on the pitch
+    # Track which players are still on the pitch (start with all 11 from each team)
     home_active: Set[int] = {p.id for p in home_players}
     away_active: Set[int] = {p.id for p in away_players}
     
     # Track bookings throughout the match
-    home_yellows = {}  # player_id -> count
-    away_yellows = {}  # player_id -> count
+    home_yellows = {}
+    away_yellows = {}
     
-    # Store events with minute stamps
+    # Store events
     bookings_with_minutes = []
-    send_offs = []  # [{player_id, minute, reason}]
+    send_offs = []
     
-    # Simulate goals (simplified - just random for now)
+    # Match state
+    match_abandoned = False
+    abandonment_reason = ""
+    abandonment_minute = 90
+    
+    # Simulate goals
     home_goals = random.randint(0, 4)
     away_goals = random.randint(0, 4)
     
-    # Simulate bookings throughout 90 minutes
+    # Simulate events throughout 90 minutes
     for minute in range(1, 91):
-        # Random chance of booking each minute (very low)
-        if random.random() < 0.02:  # 2% chance per minute
-            # Pick a random team
-            if random.choice([True, False]) and home_active:
-                # Home team booking
+        # ✅ ENFORCE 7-PLAYER RULE
+        if len(home_active) < 7:
+            match_abandoned = True
+            abandonment_reason = f"Home team insufficient players (minute {minute})"
+            abandonment_minute = minute
+            # Away team wins 3-0
+            home_goals = 0
+            away_goals = 3
+            break
+        elif len(away_active) < 7:
+            match_abandoned = True
+            abandonment_reason = f"Away team insufficient players (minute {minute})"
+            abandonment_minute = minute
+            # Home team wins 3-0
+            home_goals = 3
+            away_goals = 0
+            break
+        
+        # Random chance of booking each minute (reduced rate for realism)
+        if random.random() < 0.01:  # 1% chance per minute (was 2%)
+            # Pick a random team that still has players
+            teams_available = []
+            if home_active:
+                teams_available.append("home")
+            if away_active:
+                teams_available.append("away")
+            
+            if not teams_available:
+                break  # No players left (shouldn't happen due to 7-player check)
+            
+            team = random.choice(teams_available)
+            
+            if team == "home" and home_active:
                 player_id = random.choice(list(home_active))
                 
-                # Chance of direct red vs yellow
                 if random.random() < 0.15:  # 15% chance of direct red
                     bookings_with_minutes.append({
                         "player_id": player_id,
@@ -506,10 +587,9 @@ async def simulate_minute_based_events_async(home_players, away_players) -> dict
                         "minute": minute,
                         "reason": "direct_red"
                     })
-                    home_active.discard(player_id)  # Remove from active players
+                    home_active.discard(player_id)
                     if TEST_MODE:
-                        print(f"   🟥 MINUTE {minute}: Player {player_id} (HOME) sent off for direct red!")
-                        
+                        print(f"   🟥 MINUTE {minute}: Player {player_id} (HOME) sent off! Home now has {len(home_active)} players")
                 else:  # Yellow card
                     home_yellows[player_id] = home_yellows.get(player_id, 0) + 1
                     bookings_with_minutes.append({
@@ -518,8 +598,7 @@ async def simulate_minute_based_events_async(home_players, away_players) -> dict
                         "type": "yellow"
                     })
                     
-                    # Check for second yellow = red
-                    if home_yellows[player_id] >= 2:
+                    if home_yellows[player_id] >= 2:  # Second yellow = red
                         bookings_with_minutes.append({
                             "player_id": player_id,
                             "minute": minute,
@@ -530,12 +609,12 @@ async def simulate_minute_based_events_async(home_players, away_players) -> dict
                             "minute": minute,
                             "reason": "second_yellow"
                         })
-                        home_active.discard(player_id)  # Remove from active players
+                        home_active.discard(player_id)
                         if TEST_MODE:
-                            print(f"   🟥 MINUTE {minute}: Player {player_id} (HOME) sent off for second yellow!")
-                            
-            elif away_active:
-                # Away team booking (same logic)
+                            print(f"   🟥 MINUTE {minute}: Player {player_id} (HOME) second yellow! Home now has {len(home_active)} players")
+            
+            elif team == "away" and away_active:
+                # Same logic for away team
                 player_id = random.choice(list(away_active))
                 
                 if random.random() < 0.15:  # Direct red
@@ -551,8 +630,7 @@ async def simulate_minute_based_events_async(home_players, away_players) -> dict
                     })
                     away_active.discard(player_id)
                     if TEST_MODE:
-                        print(f"   🟥 MINUTE {minute}: Player {player_id} (AWAY) sent off for direct red!")
-                        
+                        print(f"   🟥 MINUTE {minute}: Player {player_id} (AWAY) sent off! Away now has {len(away_active)} players")
                 else:  # Yellow card
                     away_yellows[player_id] = away_yellows.get(player_id, 0) + 1
                     bookings_with_minutes.append({
@@ -561,8 +639,7 @@ async def simulate_minute_based_events_async(home_players, away_players) -> dict
                         "type": "yellow"
                     })
                     
-                    # Check for second yellow = red
-                    if away_yellows[player_id] >= 2:
+                    if away_yellows[player_id] >= 2:  # Second yellow = red
                         bookings_with_minutes.append({
                             "player_id": player_id,
                             "minute": minute,
@@ -575,13 +652,16 @@ async def simulate_minute_based_events_async(home_players, away_players) -> dict
                         })
                         away_active.discard(player_id)
                         if TEST_MODE:
-                            print(f"   🟥 MINUTE {minute}: Player {player_id} (AWAY) sent off for second yellow!")
+                            print(f"   🟥 MINUTE {minute}: Player {player_id} (AWAY) second yellow! Away now has {len(away_active)} players")
     
     return {
         "home_goals": home_goals,
         "away_goals": away_goals,
         "bookings_with_minutes": bookings_with_minutes,
         "send_offs": send_offs,
+        "match_abandoned": match_abandoned,
+        "abandonment_reason": abandonment_reason,
+        "abandonment_minute": abandonment_minute,
         "final_active_players": {
             "home": list(home_active),
             "away": list(away_active)
