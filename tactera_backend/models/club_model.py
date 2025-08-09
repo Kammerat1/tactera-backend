@@ -20,3 +20,6 @@ class Club(SQLModel, table=True):
     manager: Optional["Manager"] = Relationship(back_populates="club")
     league: Optional["League"] = Relationship(back_populates="clubs")
     training_ground: Optional["TrainingGround"] = Relationship(back_populates="club")
+    
+    formations: List["ClubFormation"] = Relationship(back_populates="club")
+
