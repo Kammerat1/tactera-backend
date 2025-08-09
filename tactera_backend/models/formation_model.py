@@ -60,7 +60,67 @@ class ClubFormation(SQLModel, table=True):
     template: Optional["FormationTemplate"] = Relationship()
 
 
-# Pydantic schemas for API requests/responses
+class MatchSquad(SQLModel, table=True):
+    """
+    Selected squad for a specific match (7-23 players).
+    This is separate from the formation which only handles starting XI.
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    match_id: int = Field(foreign_key="match.id")
+    club_id: int = Field(foreign_key="club.id")
+    
+    # JSON field storing selected player IDs for this match
+    # Example: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+    selected_players: List[int] = Field(sa_column=Column(JSON))
+    
+    # Starting XI from the match squad (exactly 11 player IDs)
+    starting_xi: List[int] = Field(sa_column=Column(JSON))
+    
+    # Substitution tracking
+    substitutions_made: int = Field(default=0)  # Count of substitution events (max 3)
+    players_substituted: int = Field(default=0)  # Count of players changed (max 5)
+    
+    # Match status
+    is_finalized: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ==========================================
+# NEW: SUBSTITUTION TRACKING MODEL
+# ==========================================
+
+class MatchSubstitution(SQLModel, table=True):
+    """
+    Tracks individual substitution events during a match.
+    Each substitution can involve 1-5 players (within the 5-player limit).
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    match_id: int = Field(foreign_key="match.id")
+    club_id: int = Field(foreign_key="club.id")
+    
+    # Substitution details
+    substitution_number: int = Field(ge=1, le=3)  # Which substitution event (1st, 2nd, or 3rd)
+    minute: int = Field(ge=0, le=120)  # Match minute when substitution occurred
+    
+    # Players involved in this substitution event
+    # JSON field storing player changes: [{"off": player_id, "on": player_id}, ...]
+    player_changes: List[Dict[str, int]] = Field(sa_column=Column(JSON))
+    
+    # Optional context
+    reason: Optional[str] = Field(default=None)  # "tactical", "injury", "booking", etc.
+    
+    # Metadata
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    # Relationships
+    match: Optional["Match"] = Relationship()
+    club: Optional["Club"] = Relationship()
+
+
+# ==========================================
+# PYDANTIC SCHEMAS FOR API
+# ==========================================
+
 class FormationTemplateRead(BaseModel):
     """Schema for returning formation template data"""
     id: int
@@ -103,28 +163,64 @@ class FormationUpdateRequest(BaseModel):
     captain_id: Optional[int] = None
     penalty_taker_id: Optional[int] = None
     free_kick_taker_id: Optional[int] = None
+
+
+# ==========================================
+# NEW: SUBSTITUTION API SCHEMAS
+# ==========================================
+
+class SubstitutionRequest(BaseModel):
+    """Schema for requesting a substitution during a match"""
+    player_changes: List[Dict[str, int]]  # [{"off": 5, "on": 12}, {"off": 8, "on": 15}]
+    minute: int = Field(ge=0, le=120)
+    reason: Optional[str] = None
     
-    # Add this new model after the existing ClubFormation class
-class MatchSquad(SQLModel, table=True):
-    """
-    Selected squad for a specific match (7-23 players).
-    This is separate from the formation which only handles starting XI.
-    """
-    id: Optional[int] = Field(default=None, primary_key=True)
-    match_id: int = Field(foreign_key="match.id")
-    club_id: int = Field(foreign_key="club.id")
+    class Config:
+        # Example: {"player_changes": [{"off": 5, "on": 12}], "minute": 65, "reason": "tactical"}
+        json_schema_extra = {
+            "example": {
+                "player_changes": [{"off": 5, "on": 12}],
+                "minute": 65,
+                "reason": "tactical"
+            }
+        }
+
+
+class SubstitutionRead(BaseModel):
+    """Schema for returning substitution data"""
+    id: int
+    match_id: int
+    club_id: int
+    substitution_number: int
+    minute: int
+    player_changes: List[Dict[str, int]]
+    reason: Optional[str]
+    created_at: datetime
     
-    # JSON field storing selected player IDs for this match
-    # Example: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
-    selected_players: List[int] = Field(sa_column=Column(JSON))
+    class Config:
+        from_attributes = True
+
+
+class MatchSquadRead(BaseModel):
+    """Schema for returning match squad data with substitution info"""
+    id: int
+    match_id: int
+    club_id: int
+    selected_players: List[int]
+    starting_xi: List[int]
+    substitutions_made: int
+    players_substituted: int
+    is_finalized: bool
     
-    # Starting XI from the match squad (exactly 11 player IDs)
-    starting_xi: List[int] = Field(sa_column=Column(JSON))
-    
-    # Substitution tracking
-    substitutions_made: int = Field(default=0)  # Count of substitution events (max 3)
-    players_substituted: int = Field(default=0)  # Count of players changed (max 5)
-    
-    # Match status
-    is_finalized: bool = Field(default=False)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    class Config:
+        from_attributes = True
+
+
+class SubstitutionValidationResponse(BaseModel):
+    """Schema for substitution validation results"""
+    is_valid: bool
+    can_substitute: bool
+    errors: List[str]
+    warnings: List[str]
+    remaining_substitutions: int
+    remaining_player_changes: int

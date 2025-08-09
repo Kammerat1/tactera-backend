@@ -36,5 +36,9 @@ from .stadium_model import Stadium, StadiumPart
 # Suspension
 from .suspension_model import Suspension
 
-# Formation system
-from .formation_model import FormationTemplate, ClubFormation, FormationTemplateRead, ClubFormationRead, FormationUpdateRequest
+# Formation system - UPDATED WITH SUBSTITUTIONS
+from .formation_model import (
+    FormationTemplate, ClubFormation, FormationTemplateRead, ClubFormationRead, 
+    FormationUpdateRequest, MatchSquad, MatchSubstitution, SubstitutionRequest, 
+    SubstitutionRead, MatchSquadRead, SubstitutionValidationResponse
+)

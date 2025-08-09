@@ -1,4 +1,4 @@
-# tactera_backend/core/match_sim.py
+# tactera_backend/core/match_sim.py - SUBSTITUTION INTEGRATION
 
 import random
 from typing import Set, Optional, List
@@ -13,9 +13,9 @@ from tactera_backend.models.stadium_model import Stadium
 from tactera_backend.models.injury_model import Injury
 from tactera_backend.core.injury_generator import calculate_injury_risk, generate_injury
 from tactera_backend.core.injury_config import REINJURY_MULTIPLIER
-from tactera_backend.core.config import TEST_MODE  # ✅ Ensure TEST_MODE is imported
+from tactera_backend.core.config import TEST_MODE
 from tactera_backend.models.suspension_model import Suspension
-from tactera_backend.models.formation_model import ClubFormation, FormationTemplate
+from tactera_backend.models.formation_model import ClubFormation, FormationTemplate, MatchSquad, MatchSubstitution
 
 # =========================================
 # 🟨🟥 Booking & Suspension Configuration
@@ -102,6 +102,7 @@ async def get_club_match_squad(db: AsyncSession, club_id: int, match_id: int = N
     """
     Get a club's match squad (7-23 players) and starting XI (7-11 players).
     Falls back to auto-selection if no manual selection exists.
+    NOW INCLUDES: Substitution tracking initialization for new matches.
     """
     # Get all available players (exclude fully injured)
     result = await db.execute(
@@ -120,6 +121,46 @@ async def get_club_match_squad(db: AsyncSession, club_id: int, match_id: int = N
             "available_count": len(available_players),
             "match_squad": [],
             "starting_xi": []
+        }
+    
+    # ==========================================
+    # NEW: Check if MatchSquad already exists for this match
+    # ==========================================
+    existing_match_squad = None
+    if match_id:
+        result = await db.execute(
+            select(MatchSquad).where(
+                MatchSquad.match_id == match_id,
+                MatchSquad.club_id == club_id
+            )
+        )
+        existing_match_squad = result.scalar_one_or_none()
+    
+    if existing_match_squad:
+        # Use existing match squad selection
+        match_squad_ids = set(existing_match_squad.selected_players)
+        starting_xi_ids = set(existing_match_squad.starting_xi)
+        
+        # Filter to only available players (in case of new injuries since squad selection)
+        available_ids = {p.id for p in available_players}
+        match_squad = [p for p in available_players if p.id in match_squad_ids & available_ids]
+        starting_xi = [p for p in available_players if p.id in starting_xi_ids & available_ids]
+        
+        return {
+            "can_play": len(starting_xi) >= 7,
+            "reason": "" if len(starting_xi) >= 7 else f"Insufficient starting XI players (need 7, have {len(starting_xi)})",
+            "available_count": len(available_players),
+            "match_squad": match_squad,
+            "match_squad_size": len(match_squad),
+            "starting_xi": starting_xi,
+            "starting_xi_count": len(starting_xi),
+            "formation_info": {
+                "has_formation": True,
+                "formation_name": "Pre-selected Squad",
+                "assigned_count": len(starting_xi),
+                "auto_filled": 0
+            },
+            "existing_match_squad": existing_match_squad  # Return for reference
         }
     
     # For now, auto-select match squad (we'll add manual selection later)
@@ -180,6 +221,23 @@ async def get_club_match_squad(db: AsyncSession, club_id: int, match_id: int = N
             "auto_filled": len(starting_xi)
         }
     
+    # ==========================================
+    # NEW: Create MatchSquad record if match_id provided
+    # ==========================================
+    if match_id and not existing_match_squad:
+        new_match_squad = MatchSquad(
+            match_id=match_id,
+            club_id=club_id,
+            selected_players=[p.id for p in match_squad],
+            starting_xi=[p.id for p in starting_xi],
+            substitutions_made=0,
+            players_substituted=0,
+            is_finalized=False
+        )
+        db.add(new_match_squad)
+        await db.commit()
+        await db.refresh(new_match_squad)
+    
     return {
         "can_play": True,
         "reason": "",
@@ -190,53 +248,18 @@ async def get_club_match_squad(db: AsyncSession, club_id: int, match_id: int = N
         "starting_xi_count": len(starting_xi),  # ✅ Can be 7-11
         "formation_info": formation_info
     }
-    
-def validate_formation_for_match(lineup: dict) -> dict:
-    """
-    Validate that a formation has the minimum required players for a match.
-    Returns validation status and any issues.
-    """
-    if not lineup["has_formation"]:
-        return {
-            "is_valid": False,
-            "issues": ["No formation set"],
-            "can_play": False
-        }
-    
-    selected_players = lineup["selected_players"]
-    
-    if len(selected_players) < 11:
-        return {
-            "is_valid": False,
-            "issues": [f"Only {len(selected_players)} players assigned, need 11"],
-            "can_play": len(selected_players) >= 7  # Minimum to play a match
-        }
-    
-    # Check for goalkeeper
-    has_goalkeeper = any(p["position"] == "GK" for p in selected_players)
-    if not has_goalkeeper:
-        return {
-            "is_valid": False,
-            "issues": ["No goalkeeper assigned"],
-            "can_play": False
-        }
-    
-    return {
-        "is_valid": True,
-        "issues": [],
-        "can_play": True
-    }
 
-async def simulate_match(db: AsyncSession, fixture_id: int):
-    """
-    Simulates a single match with proper send-off timing and suspension logic:
-    - Players getting cards are immediately removed from the match
-    - Suspensions are created AFTER the match ends
-    - Suspension countdown doesn't affect the current match
-    - Fully injured players are excluded from selection
-    - Rehab-phase players can play but face increased reinjury risk
-    """
 
+# ==========================================
+# NEW: SUBSTITUTION-AWARE MATCH SIMULATION
+# ==========================================
+
+async def simulate_match_with_substitutions(db: AsyncSession, fixture_id: int):
+    """
+    Enhanced match simulation that can handle live substitutions.
+    This version tracks current players on pitch throughout the match.
+    """
+    
     # 1️⃣ Fetch fixture
     result = await db.execute(select(Match).where(Match.id == fixture_id))
     fixture = result.scalar_one_or_none()
@@ -247,7 +270,7 @@ async def simulate_match(db: AsyncSession, fixture_id: int):
     home_club = await db.get(Club, fixture.home_club_id)
     away_club = await db.get(Club, fixture.away_club_id)
 
-    # 3️⃣ Fetch match squads and starting XIs
+    # 3️⃣ Fetch match squads and starting XIs (this creates MatchSquad records)
     home_squad_info = await get_club_match_squad(db, fixture.home_club_id, fixture.id)
     away_squad_info = await get_club_match_squad(db, fixture.away_club_id, fixture.id)
     
@@ -269,7 +292,8 @@ async def simulate_match(db: AsyncSession, fixture_id: int):
             "away_goals": 3,
             "injuries": [],
             "bookings": [],
-            "send_offs": []
+            "send_offs": [],
+            "substitutions": []
         }
     
     if not away_squad_info["can_play"]:
@@ -289,23 +313,18 @@ async def simulate_match(db: AsyncSession, fixture_id: int):
             "away_goals": 0,
             "injuries": [],
             "bookings": [],
-            "send_offs": []
+            "send_offs": [],
+            "substitutions": []
         }
     
     # Both teams can play - get starting XIs
-    home_players = home_squad_info["starting_xi"]  # Exactly 11 players
-    away_players = away_squad_info["starting_xi"]  # Exactly 11 players
+    home_players = home_squad_info["starting_xi"]
+    away_players = away_squad_info["starting_xi"]
     
     if TEST_MODE:
-        print(f"\n🏁 Starting match simulation: {home_club.name} vs {away_club.name}")
+        print(f"\n🏁 Starting substitution-aware match simulation: {home_club.name} vs {away_club.name}")
         print(f"   Home: {len(home_players)} starting players (squad: {home_squad_info['match_squad_size']})")
         print(f"   Away: {len(away_players)} starting players (squad: {away_squad_info['match_squad_size']})")
-        
-        # Show if teams are playing with less than 11
-        if len(home_players) < 11:
-            print(f"   ⚠️ Home team starting with only {len(home_players)} players")
-        if len(away_players) < 11:
-            print(f"   ⚠️ Away team starting with only {len(away_players)} players")
 
     # 4️⃣ Stadium pitch quality
     stadium_result = await db.execute(select(Stadium).where(Stadium.club_id == home_club.id))
@@ -313,23 +332,23 @@ async def simulate_match(db: AsyncSession, fixture_id: int):
     pitch_quality = stadium.pitch_quality if stadium else 50
 
     # =========================================
-    # 🕐 NEW: Minute-based event simulation with immediate send-offs
+    # 🕐 NEW: Enhanced minute-based simulation with substitution support
     # =========================================
-    if TEST_MODE:
-        print(f"\n🏁 Starting async match simulation: {home_club.name} vs {away_club.name}")
-        print(f"   Initial squad sizes: Home={len(home_players)}, Away={len(away_players)}")
-
-    match_events = await simulate_minute_based_events_async(home_players, away_players)
+    match_events = await simulate_minute_based_events_with_substitutions_async(
+        home_players, away_players, fixture.id, db
+    )
     
     home_goals = match_events["home_goals"]
     away_goals = match_events["away_goals"]
     bookings_payload = match_events["bookings_with_minutes"]
     send_offs = match_events["send_offs"]
+    substitutions = match_events["substitutions"]
     
     if TEST_MODE:
         print(f"   Final score: {home_goals}-{away_goals}")
         print(f"   Total bookings: {len(bookings_payload)}")
         print(f"   Players sent off: {len(send_offs)}")
+        print(f"   Substitutions made: {len(substitutions)}")
 
     # 5️⃣ Update fixture with results
     fixture.home_goals = home_goals
@@ -338,7 +357,7 @@ async def simulate_match(db: AsyncSession, fixture_id: int):
     fixture.match_time = datetime.utcnow()
 
     # =========================================
-    # 🟥 NEW: Create suspensions AFTER match ends
+    # 🟥 Create suspensions AFTER match ends (unchanged)
     # =========================================
     newly_suspended_players = set()
     
@@ -348,42 +367,37 @@ async def simulate_match(db: AsyncSession, fixture_id: int):
         reason = send_off["reason"]
         
         if reason == "second_yellow":
-            suspension_length = TWO_YELLOWS_SUSPENSION
+            suspension_length = 1  # TWO_YELLOWS_SUSPENSION
             await create_or_update_suspension(db, player_id, suspension_length, "two_yellows")
-            
             newly_suspended_players.add(player_id)
             if TEST_MODE:
                 print(f"   📋 Created {suspension_length}-match suspension for player {player_id} (two yellows)")
                 
         elif reason == "direct_red":
-            suspension_length = random.randint(RED_SUSPENSION_MIN, RED_SUSPENSION_MAX)
+            suspension_length = random.randint(1, 3)  # RED_SUSPENSION_MIN, RED_SUSPENSION_MAX
             await create_or_update_suspension(db, player_id, suspension_length, "red_card")
             newly_suspended_players.add(player_id)
             if TEST_MODE:
                 print(f"   📋 Created {suspension_length}-match suspension for player {player_id} (red card)")
 
     # =========================================
-    # 📉 Decrement existing suspensions (but skip this match's new ones)
+    # 📉 Decrement existing suspensions
     # =========================================
-    if TEST_MODE and newly_suspended_players:
-        print(f"   🔄 Decrementing existing suspensions (skipping {len(newly_suspended_players)} new ones)")
-    
     await decrement_suspensions_after_match(db, fixture.home_club_id, fixture.away_club_id)
 
-    # 6️⃣ Injury & Reinjury Risk Logic (only for players who weren't sent off)
+    # 6️⃣ Injury & Reinjury Risk Logic (only for players who finished the match on pitch)
     injuries = []
-    base_risk = 0.05  # Baseline injury risk (5%)
+    base_risk = 0.05
     all_players = list(home_players) + list(away_players)
     active_at_end = set(match_events["final_active_players"]["home"] + match_events["final_active_players"]["away"])
 
     for player in all_players:
-        # Skip injury calculation for players who were sent off
+        # Skip injury calculation for players who were sent off or substituted off
         if player.id not in active_at_end:
             if TEST_MODE:
-                print(f"   🚫 Skipping injury risk for sent-off player: {player.first_name} {player.last_name}")
+                print(f"   🚫 Skipping injury risk for player no longer on pitch: {player.first_name} {player.last_name}")
             continue
 
-        # Placeholder fatigue and injury proneness (future systems will enhance this)
         energy = 100  
         injury_proneness = 1.0  
 
@@ -397,17 +411,7 @@ async def simulate_match(db: AsyncSession, fixture_id: int):
         risk = calculate_injury_risk(base_risk, pitch_quality, energy, injury_proneness)
 
         if rehab_injury and rehab_injury.days_remaining <= rehab_injury.rehab_start:
-            risk *= REINJURY_MULTIPLIER  # ✅ Config-driven multiplier
-            if TEST_MODE:
-                print(f"   - Applied Reinjury Multiplier: x{REINJURY_MULTIPLIER}")
-
-        if TEST_MODE:
-            print(f"[DEBUG] Injury Check: {player.first_name} {player.last_name}")
-            print(f"   - Base Risk: {base_risk*100:.2f}%")
-            print(f"   - Pitch Quality: {pitch_quality}")
-            print(f"   - Energy: {energy}")
-            print(f"   - Rehab Phase: {'Yes' if rehab_injury else 'No'}")
-            print(f"   - Final Risk: {risk*100:.2f}%")
+            risk *= REINJURY_MULTIPLIER
 
         # Roll for injury
         if random.random() < risk:
@@ -426,7 +430,7 @@ async def simulate_match(db: AsyncSession, fixture_id: int):
                 rehab_injury.fit_for_matches = False
                 rehab_injury.days_remaining = new_injury_data["days_total"]
                 if TEST_MODE:
-                    print(f"   🔁 Reinjury Event: {player.first_name} {player.last_name} aggravated an existing injury during the match!")
+                    print(f"   🔁 Reinjury Event: {player.first_name} {player.last_name} aggravated an existing injury!")
             else:
                 # Fresh injury assignment
                 new_injury = Injury(
@@ -443,21 +447,10 @@ async def simulate_match(db: AsyncSession, fixture_id: int):
                 )
                 db.add(new_injury)
 
-            # Log injury for summary
-            club_result = await db.execute(select(Club).where(Club.id == player.club_id))
-            player_club = club_result.scalar_one()
-
-            print(
-                f"[{datetime.now(tz)}] 🩺 Injury Logged: "
-                f"{player.first_name} {player.last_name} "
-                f"({player_club.name}) suffered '{new_injury_data['name']}' "
-                f"({new_injury_data['severity']}, {new_injury_data['days_total']} days)"
-            )
-
             injuries.append({
                 "player_id": player.id,
                 "player_name": f"{player.first_name} {player.last_name}",
-                "reinjury": bool(rehab_injury),  # ✅ True if aggravated an existing rehab injury
+                "reinjury": bool(rehab_injury),
                 **new_injury_data
             })
 
@@ -468,13 +461,13 @@ async def simulate_match(db: AsyncSession, fixture_id: int):
     if TEST_MODE:
         total_injuries = len(injuries)
         reinjury_count = sum(1 for inj in injuries if inj["reinjury"])
-        print(f"\n📊 Async Match Summary:")
+        print(f"\n📊 Enhanced Match Summary:")
         print(f"   Score: {home_goals}-{away_goals}")
         print(f"   Injuries: {total_injuries} total ({total_injuries - reinjury_count} new, {reinjury_count} reinjuries)")
         print(f"   Send-offs: {len(send_offs)}")
+        print(f"   Substitutions: {len(substitutions)}")
         print(f"   New suspensions: {len(newly_suspended_players)}")
-        print(f"   Fixture ID: {fixture.id}")
-        print("🏁 Async match simulation complete!\n")
+        print("🏁 Enhanced match simulation complete!\n")
 
     return {
         "fixture_id": fixture.id,
@@ -486,13 +479,14 @@ async def simulate_match(db: AsyncSession, fixture_id: int):
         "injuries": injuries,
         "bookings": bookings_payload,
         "send_offs": send_offs,
+        "substitutions": substitutions,  # NEW: Include substitution events
         
-        # NEW: Formation information with squad details
+        # Formation information with squad details
         "formations": {
             "home": {
                 "formation_name": home_squad_info["formation_info"]["formation_name"],
                 "has_formation": home_squad_info["formation_info"]["has_formation"],
-                "starting_players": len(home_players),  # ✅ Shows actual count (7-11)
+                "starting_players": len(home_players),
                 "match_squad_size": home_squad_info["match_squad_size"],
                 "assigned_count": home_squad_info["formation_info"]["assigned_count"],
                 "auto_filled": home_squad_info["formation_info"]["auto_filled"]
@@ -500,7 +494,7 @@ async def simulate_match(db: AsyncSession, fixture_id: int):
             "away": {
                 "formation_name": away_squad_info["formation_info"]["formation_name"],
                 "has_formation": away_squad_info["formation_info"]["has_formation"],
-                "starting_players": len(away_players),  # ✅ Shows actual count (7-11)
+                "starting_players": len(away_players),
                 "match_squad_size": away_squad_info["match_squad_size"],
                 "assigned_count": away_squad_info["formation_info"]["assigned_count"],
                 "auto_filled": away_squad_info["formation_info"]["auto_filled"]
@@ -510,15 +504,18 @@ async def simulate_match(db: AsyncSession, fixture_id: int):
 
 
 # =========================================
-# 🕐 NEW: Async minute-based event simulation
+# 🕐 NEW: Enhanced minute-based simulation with substitutions
 # =========================================
-async def simulate_minute_based_events_async(home_players, away_players) -> dict:
+async def simulate_minute_based_events_with_substitutions_async(
+    home_players, away_players, match_id: int, db: AsyncSession
+) -> dict:
     """
-    Simulates minute-by-minute events with proper 7-player rule enforcement.
+    Enhanced minute-by-minute simulation that can apply substitutions from the database.
+    This reads any MatchSubstitution records for the match and applies them at the correct minute.
     """
     from typing import Set
     
-    # Track which players are still on the pitch (start with all 11 from each team)
+    # Track which players are still on the pitch (start with all starting XI)
     home_active: Set[int] = {p.id for p in home_players}
     away_active: Set[int] = {p.id for p in away_players}
     
@@ -529,6 +526,7 @@ async def simulate_minute_based_events_async(home_players, away_players) -> dict
     # Store events
     bookings_with_minutes = []
     send_offs = []
+    applied_substitutions = []  # NEW: Track applied substitutions
     
     # Match state
     match_abandoned = False
@@ -539,14 +537,75 @@ async def simulate_minute_based_events_async(home_players, away_players) -> dict
     home_goals = random.randint(0, 4)
     away_goals = random.randint(0, 4)
     
+    # ==========================================
+    # NEW: Load all substitutions for this match
+    # ==========================================
+    result = await db.execute(
+        select(MatchSubstitution).where(
+            MatchSubstitution.match_id == match_id
+        ).order_by(MatchSubstitution.minute, MatchSubstitution.substitution_number)
+    )
+    scheduled_substitutions = result.scalars().all()
+    
+    # Group substitutions by minute for easy lookup
+    substitutions_by_minute = {}
+    for sub in scheduled_substitutions:
+        minute = sub.minute
+        if minute not in substitutions_by_minute:
+            substitutions_by_minute[minute] = []
+        substitutions_by_minute[minute].append(sub)
+    
+    if TEST_MODE and scheduled_substitutions:
+        print(f"   📋 Found {len(scheduled_substitutions)} pre-scheduled substitutions")
+    
     # Simulate events throughout 90 minutes
     for minute in range(1, 91):
-        # ✅ ENFORCE 7-PLAYER RULE
+        # ==========================================
+        # NEW: Apply any scheduled substitutions for this minute
+        # ==========================================
+        if minute in substitutions_by_minute:
+            for substitution in substitutions_by_minute[minute]:
+                club_id = substitution.club_id
+                
+                # Determine which team this substitution affects
+                if club_id == home_players[0].club_id:  # Assume all home players have same club_id
+                    active_players = home_active
+                    team_name = "HOME"
+                else:
+                    active_players = away_active
+                    team_name = "AWAY"
+                
+                # Apply each player change in this substitution
+                for change in substitution.player_changes:
+                    player_off = change["off"]
+                    player_on = change["on"]
+                    
+                    # Validate substitution can still be applied
+                    if player_off in active_players:
+                        active_players.discard(player_off)  # Remove player going off
+                        active_players.add(player_on)       # Add player coming on
+                        
+                        applied_substitutions.append({
+                            "minute": minute,
+                            "club_id": club_id,
+                            "team": team_name,
+                            "player_off": player_off,
+                            "player_on": player_on,
+                            "substitution_number": substitution.substitution_number,
+                            "reason": substitution.reason
+                        })
+                        
+                        if TEST_MODE:
+                            print(f"   🔄 MINUTE {minute}: {team_name} substitution - Player {player_off} OFF, Player {player_on} ON")
+                    else:
+                        if TEST_MODE:
+                            print(f"   ⚠️ MINUTE {minute}: Cannot substitute player {player_off} - not on pitch")
+        
+        # ✅ ENFORCE 7-PLAYER RULE (after substitutions)
         if len(home_active) < 7:
             match_abandoned = True
             abandonment_reason = f"Home team insufficient players (minute {minute})"
             abandonment_minute = minute
-            # Away team wins 3-0
             home_goals = 0
             away_goals = 3
             break
@@ -554,13 +613,12 @@ async def simulate_minute_based_events_async(home_players, away_players) -> dict
             match_abandoned = True
             abandonment_reason = f"Away team insufficient players (minute {minute})"
             abandonment_minute = minute
-            # Home team wins 3-0
             home_goals = 3
             away_goals = 0
             break
         
         # Random chance of booking each minute (reduced rate for realism)
-        if random.random() < 0.01:  # 1% chance per minute (was 2%)
+        if random.random() < 0.01:  # 1% chance per minute
             # Pick a random team that still has players
             teams_available = []
             if home_active:
@@ -659,6 +717,7 @@ async def simulate_minute_based_events_async(home_players, away_players) -> dict
         "away_goals": away_goals,
         "bookings_with_minutes": bookings_with_minutes,
         "send_offs": send_offs,
+        "substitutions": applied_substitutions,  # NEW: Return substitution events
         "match_abandoned": match_abandoned,
         "abandonment_reason": abandonment_reason,
         "abandonment_minute": abandonment_minute,
@@ -670,55 +729,13 @@ async def simulate_minute_based_events_async(home_players, away_players) -> dict
 
 
 # =========================================
-# 📉 NEW: Async suspension countdown with smart exclusion
+# HELPER FUNCTIONS FOR SUBSTITUTION SYSTEM
 # =========================================
-async def decrement_suspensions_after_match_async(db: AsyncSession, home_club_id: int, away_club_id: int, newly_suspended_players: Set[int]) -> None:
-    """
-    Decrements matches_remaining for all players with active suspensions
-    in either the home or away club for the just-played match.
-    
-    NEW: Skip players who got suspended in THIS match (newly_suspended_players)
-    so their suspension countdown doesn't start until the NEXT match.
-    """
-    # Find all Suspension rows for players in either club with matches_remaining > 0
-    stmt = (
-        select(Suspension)
-        .join(Player, Player.id == Suspension.player_id)
-        .where(
-            Player.club_id.in_([home_club_id, away_club_id]),
-            Suspension.matches_remaining > 0
-        )
-    )
-    result = await db.execute(stmt)
-    suspensions = result.scalars().all()
 
-    # Decrement each suspension, but skip players who got suspended this match
-    changed = False
-    for sus in suspensions:
-        # Skip players who got suspended in this same match
-        if sus.player_id in newly_suspended_players:
-            if TEST_MODE:
-                print(f"   ⏭️  Skipping suspension decrement for player {sus.player_id} (suspended this match)")
-            continue
-            
-        sus.matches_remaining = max(0, sus.matches_remaining - 1)
-        sus.updated_at = datetime.utcnow()
-        db.add(sus)
-        changed = True
-        
-        if TEST_MODE:
-            print(f"   ⏬ Player {sus.player_id} suspension decremented to {sus.matches_remaining} matches")
-
-# ---------------------------------------------
-# Helper: add/update a suspension for a player
-# ---------------------------------------------
 async def create_or_update_suspension(db: AsyncSession, player_id: int, matches: int, reason: str):
     """
     Creates a new Suspension or adds matches onto an existing one.
-    - If there's any existing Suspension row for this player, we ADD to matches_remaining.
-    - Otherwise, we create a fresh suspension.
     """
-    # Find any suspension rows for this player
     result = await db.execute(
         select(Suspension).where(Suspension.player_id == player_id)
     )
@@ -726,7 +743,7 @@ async def create_or_update_suspension(db: AsyncSession, player_id: int, matches:
 
     if existing:
         existing.matches_remaining = max(0, existing.matches_remaining) + max(0, matches)
-        existing.total_matches_suspended += max(0, matches)  # NEW: Track total
+        existing.total_matches_suspended += max(0, matches)
         existing.reason = reason
         existing.updated_at = datetime.utcnow()
         db.add(existing)
@@ -735,21 +752,18 @@ async def create_or_update_suspension(db: AsyncSession, player_id: int, matches:
             player_id=player_id,
             reason=reason,
             matches_remaining=max(0, matches),
-            total_matches_suspended=max(0, matches)  # NEW: Track total
+            total_matches_suspended=max(0, matches)
         )
         db.add(sus)
 
     await db.commit()
 
-# ------------------------------------------------------------
-# Suspension countdown per match
-# ------------------------------------------------------------
+
 async def decrement_suspensions_after_match(db: AsyncSession, home_club_id: int, away_club_id: int) -> None:
     """
     Decrements matches_remaining for all players with active suspensions
     in either the home or away club for the just-played match.
     """
-    # Find all Suspension rows for players in either club with matches_remaining > 0
     stmt = (
         select(Suspension)
         .join(Player, Player.id == Suspension.player_id)
@@ -761,14 +775,24 @@ async def decrement_suspensions_after_match(db: AsyncSession, home_club_id: int,
     result = await db.execute(stmt)
     suspensions = result.scalars().all()
 
-    # Decrement each and stage for commit
-    changed = False  # ✅ ADD THIS LINE
+    changed = False
     for sus in suspensions:
         sus.matches_remaining = max(0, sus.matches_remaining - 1)
         sus.updated_at = datetime.utcnow()
         db.add(sus)
-        changed = True  # ✅ ADD THIS LINE
+        changed = True
 
-    # Commit changes if any
     if changed:
         await db.commit()
+
+
+# =========================================
+# BACKWARD COMPATIBILITY: Keep original simulate_match function
+# =========================================
+
+async def simulate_match(db: AsyncSession, fixture_id: int):
+    """
+    Original match simulation function - now calls the enhanced version.
+    Maintained for backward compatibility with existing code.
+    """
+    return await simulate_match_with_substitutions(db, fixture_id)

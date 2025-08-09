@@ -3,6 +3,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 from tactera_backend.core.database import get_db
 from tactera_backend.models.player_model import Player
+from tactera_backend.models.formation_model import MatchSquad, MatchSubstitution, SubstitutionRequest
+from tactera_backend.routes.substitution_routes import validate_substitution_request
+from tactera_backend.core.database import get_session, sync_engine
 
 router = APIRouter()
 
@@ -225,4 +228,281 @@ def debug_suspend_player(data: SuspendRequest, session: Session = Depends(get_se
         "player_id": player.id,
         "matches_remaining": active.matches_remaining,
         "reason": active.reason
+    }
+
+# ==========================================
+# DEBUG: SUBSTITUTION SYSTEM TESTING
+# ==========================================
+
+@router.post("/debug/create-match-squad")
+async def debug_create_match_squad(
+    match_id: int,
+    club_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    DEBUG: Manually create a match squad for testing substitutions.
+    Selects first 18 available players for squad, first 11 for starting XI.
+    """
+    # Get available players for this club
+    result = await db.execute(
+        select(Player).where(Player.club_id == club_id).limit(18)
+    )
+    players = result.scalars().all()
+    
+    if len(players) < 11:
+        raise HTTPException(status_code=400, detail=f"Club needs at least 11 players, found {len(players)}")
+    
+    # Check if match squad already exists
+    existing = await db.execute(
+        select(MatchSquad).where(
+            MatchSquad.match_id == match_id,
+            MatchSquad.club_id == club_id
+        )
+    )
+    existing_squad = existing.scalar_one_or_none()
+    
+    if existing_squad:
+        return {
+            "message": "Match squad already exists",
+            "match_squad_id": existing_squad.id,
+            "selected_players": existing_squad.selected_players,
+            "starting_xi": existing_squad.starting_xi
+        }
+    
+    # Create new match squad
+    squad_players = [p.id for p in players]
+    starting_players = squad_players[:11]  # First 11 as starting XI
+    
+    match_squad = MatchSquad(
+        match_id=match_id,
+        club_id=club_id,
+        selected_players=squad_players,
+        starting_xi=starting_players,
+        substitutions_made=0,
+        players_substituted=0,
+        is_finalized=False
+    )
+    
+    db.add(match_squad)
+    await db.commit()
+    await db.refresh(match_squad)
+    
+    return {
+        "message": "Match squad created successfully",
+        "match_squad_id": match_squad.id,
+        "squad_size": len(squad_players),
+        "starting_xi_size": len(starting_players),
+        "selected_players": squad_players,
+        "starting_xi": starting_players
+    }
+
+
+@router.post("/debug/make-test-substitution")
+async def debug_make_test_substitution(
+    match_id: int,
+    club_id: int,
+    player_off: int,
+    player_on: int,
+    minute: int = 60,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    DEBUG: Make a simple test substitution.
+    Useful for testing the substitution validation and creation logic.
+    """
+    # Create substitution request
+    substitution_request = SubstitutionRequest(
+        player_changes=[{"off": player_off, "on": player_on}],
+        minute=minute,
+        reason="debug_test"
+    )
+    
+    # Use the validation function from substitution_routes
+    with Session(sync_engine) as session:
+        validation = validate_substitution_request(match_id, club_id, substitution_request, session)
+    
+    if not validation.is_valid:
+        return {
+            "success": False,
+            "validation_errors": validation.errors,
+            "warnings": validation.warnings
+        }
+    
+    # Create the substitution if valid
+    match_squad = await db.execute(
+        select(MatchSquad).where(
+            MatchSquad.match_id == match_id,
+            MatchSquad.club_id == club_id
+        )
+    )
+    match_squad = match_squad.scalar_one_or_none()
+    
+    if not match_squad:
+        raise HTTPException(status_code=404, detail="Match squad not found")
+    
+    # Create substitution record
+    substitution = MatchSubstitution(
+        match_id=match_id,
+        club_id=club_id,
+        substitution_number=match_squad.substitutions_made + 1,
+        minute=minute,
+        player_changes=[{"off": player_off, "on": player_on}],
+        reason="debug_test"
+    )
+    
+    db.add(substitution)
+    
+    # Update counters
+    match_squad.substitutions_made += 1
+    match_squad.players_substituted += 1
+    db.add(match_squad)
+    
+    await db.commit()
+    await db.refresh(substitution)
+    
+    return {
+        "success": True,
+        "substitution_id": substitution.id,
+        "substitution_number": substitution.substitution_number,
+        "minute": substitution.minute,
+        "player_changes": substitution.player_changes,
+        "remaining_substitutions": 3 - match_squad.substitutions_made,
+        "remaining_player_changes": 5 - match_squad.players_substituted
+    }
+
+
+@router.get("/debug/match-squad/{match_id}/{club_id}")
+async def debug_get_match_squad_details(
+    match_id: int,
+    club_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    DEBUG: Get detailed information about a match squad and its substitutions.
+    """
+    # Get match squad
+    result = await db.execute(
+        select(MatchSquad).where(
+            MatchSquad.match_id == match_id,
+            MatchSquad.club_id == club_id
+        )
+    )
+    match_squad = result.scalar_one_or_none()
+    
+    if not match_squad:
+        return {"error": "Match squad not found"}
+    
+    # Get substitutions
+    substitutions_result = await db.execute(
+        select(MatchSubstitution).where(
+            MatchSubstitution.match_id == match_id,
+            MatchSubstitution.club_id == club_id
+        ).order_by(MatchSubstitution.substitution_number)
+    )
+    substitutions = substitutions_result.scalars().all()
+    
+    # Get player details
+    all_player_ids = set(match_squad.selected_players)
+    for sub in substitutions:
+        for change in sub.player_changes:
+            all_player_ids.add(change["off"])
+            all_player_ids.add(change["on"])
+    
+    players_result = await db.execute(
+        select(Player).where(Player.id.in_(all_player_ids))
+    )
+    players = {p.id: f"{p.first_name} {p.last_name}" for p in players_result.scalars()}
+    
+    # Calculate current state
+    substituted_off = set()
+    substituted_on = set()
+    
+    for sub in substitutions:
+        for change in sub.player_changes:
+            substituted_off.add(change["off"])
+            substituted_on.add(change["on"])
+    
+    current_on_pitch = set(match_squad.starting_xi) - substituted_off | substituted_on
+    
+    return {
+        "match_squad": {
+            "id": match_squad.id,
+            "match_id": match_squad.match_id,
+            "club_id": match_squad.club_id,
+            "selected_players": match_squad.selected_players,
+            "starting_xi": match_squad.starting_xi,
+            "substitutions_made": match_squad.substitutions_made,
+            "players_substituted": match_squad.players_substituted,
+            "is_finalized": match_squad.is_finalized
+        },
+        "substitutions": [
+            {
+                "id": sub.id,
+                "substitution_number": sub.substitution_number,
+                "minute": sub.minute,
+                "player_changes": sub.player_changes,
+                "reason": sub.reason
+            }
+            for sub in substitutions
+        ],
+        "current_state": {
+            "players_on_pitch": list(current_on_pitch),
+            "players_on_pitch_names": [players.get(pid, f"Player {pid}") for pid in current_on_pitch],
+            "substituted_off": list(substituted_off),
+            "substituted_off_names": [players.get(pid, f"Player {pid}") for pid in substituted_off],
+            "substituted_on": list(substituted_on),
+            "substituted_on_names": [players.get(pid, f"Player {pid}") for pid in substituted_on]
+        },
+        "player_names": players
+    }
+
+
+@router.post("/debug/simulate-match-with-substitutions/{fixture_id}")
+async def debug_simulate_match_with_substitutions(
+    fixture_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    DEBUG: Simulate a match using the new substitution-aware simulation.
+    """
+    from tactera_backend.core.match_sim import simulate_match_with_substitutions
+    
+    try:
+        result = await simulate_match_with_substitutions(db, fixture_id)
+        return {
+            "success": True,
+            "result": result
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Match simulation failed: {str(e)}")
+
+
+@router.get("/debug/substitution-validation/{match_id}/{club_id}")
+async def debug_substitution_validation(
+    match_id: int,
+    club_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    DEBUG: Check substitution validation status for a club in a match.
+    """
+    from tactera_backend.core.database import get_session
+    
+    # Use sync session for validation function
+    with Session(sync_engine) as session:
+        dummy_request = SubstitutionRequest(player_changes=[], minute=45)
+        validation = validate_substitution_request(match_id, club_id, dummy_request, session)
+    
+    return {
+        "match_id": match_id,
+        "club_id": club_id,
+        "validation": {
+            "is_valid": validation.is_valid,
+            "can_substitute": validation.can_substitute,
+            "errors": validation.errors,
+            "warnings": validation.warnings,
+            "remaining_substitutions": validation.remaining_substitutions,
+            "remaining_player_changes": validation.remaining_player_changes
+        }
     }
