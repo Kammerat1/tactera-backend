@@ -15,6 +15,43 @@ from tactera_backend.core.injury_config import LOW_ENERGY_THRESHOLD
 router = APIRouter()
 
 # ---------------------------------------------
+# Helpers for per-player availability (fixture view)
+# ---------------------------------------------
+def get_active_injury(player: Player):
+    """
+    Returns the first active injury for the player (if any).
+    'Active' means days_remaining > 0. If none, returns None.
+    """
+    if getattr(player, "injuries", None):
+        for inj in player.injuries:
+            if inj.days_remaining > 0:
+                return inj
+    return None
+
+
+def compute_player_availability(player: Player) -> str:
+    """
+    Derives a single availability status for a player:
+    - "injured": active injury and days_remaining > rehab_start
+    - "rehab":   active injury and 0 < days_remaining <= rehab_start
+    - "tired":   no active injury and energy < LOW_ENERGY_THRESHOLD
+    - "suspended": (not implemented yet) -> always "ok" for now
+    - "ok":      otherwise
+    """
+    active_injury = get_active_injury(player)
+    if active_injury:
+        if active_injury.days_remaining <= active_injury.rehab_start:
+            return "rehab"
+        return "injured"
+
+    if player.energy < LOW_ENERGY_THRESHOLD:
+        return "tired"
+
+    # Suspensions not implemented yet
+    return "ok"
+
+
+# ---------------------------------------------
 # Availability helper for fixture list badges
 # ---------------------------------------------
 def compute_availability_counts(session: Session, club_id: int) -> dict:
@@ -329,4 +366,71 @@ async def simulate_round_endpoint(league_id: int, db: AsyncSession = Depends(get
     return {
         "message": round_message,
         "results": results
+    }
+
+@router.get("/fixtures/{fixture_id}/availability")
+def get_fixture_availability(fixture_id: int, session: Session = Depends(get_session)):
+    """
+    Returns per-player availability for both clubs in a specific fixture.
+    Each player includes:
+    - availability_status: "injured" | "rehab" | "tired" | "suspended" | "ok"
+    - a minimal active_injury summary if present
+    """
+    # 1) Load the fixture
+    fixture = session.get(Match, fixture_id)
+    if not fixture:
+        raise HTTPException(status_code=404, detail="Fixture not found")
+
+    # 2) Resolve clubs (nice for response)
+    home_club = session.get(Club, fixture.home_club_id) if fixture.home_club_id else None
+    away_club = session.get(Club, fixture.away_club_id) if fixture.away_club_id else None
+
+    # 3) Load both squads
+    home_players = session.exec(select(Player).where(Player.club_id == fixture.home_club_id)).all()
+    away_players = session.exec(select(Player).where(Player.club_id == fixture.away_club_id)).all()
+
+    def serialize_player(p: Player) -> dict:
+        """
+        Converts a Player row into a minimal dict for the UI with availability_status.
+        Includes an active_injury summary if applicable.
+        """
+        status = compute_player_availability(p)
+        active_injury = get_active_injury(p)
+
+        injury_summary = None
+        if active_injury:
+            injury_summary = {
+                "name": active_injury.name,
+                "days_remaining": active_injury.days_remaining,
+                "rehab_start": active_injury.rehab_start,
+                "start_date": active_injury.start_date,
+                "days_total": active_injury.days_total,
+            }
+
+        return {
+            "id": p.id,
+            "first_name": p.first_name,
+            "last_name": p.last_name,
+            "position": p.position,
+            "energy": p.energy,
+            "availability_status": status,
+            "active_injury": injury_summary,
+        }
+
+    # 4) Build response
+    return {
+        "fixture_id": fixture.id,
+        "round_number": fixture.round_number,
+        "match_time": fixture.match_time,
+        "played": (fixture.home_goals is not None and fixture.away_goals is not None),
+        "home": {
+            "club_id": fixture.home_club_id,
+            "club_name": home_club.name if home_club else None,
+            "squad": [serialize_player(p) for p in home_players],
+        },
+        "away": {
+            "club_id": fixture.away_club_id,
+            "club_name": away_club.name if away_club else None,
+            "squad": [serialize_player(p) for p in away_players],
+        },
     }
