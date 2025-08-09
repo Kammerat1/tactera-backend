@@ -73,60 +73,33 @@ def compute_player_availability(player: Player) -> str:
 # ---------------------------------------------
 def compute_availability_counts(session: Session, club_id: int) -> dict:
     """
-    Computes availability summary for a club's squad.
-    Returns counts for: injured, rehab, tired, suspended, ok.
-
-    Rules:
-    - injured: player has an active injury (days_remaining > rehab_start)
-    - rehab: player has an active injury and is in the rehab phase
-             (days_remaining > 0 AND days_remaining <= rehab_start)
-    - tired: player has NO active injury and energy < LOW_ENERGY_THRESHOLD
-    - suspended: currently not implemented in backend -> always 0
-    - ok: everyone else (no active injury and not tired)
-
-    Notes:
-    - We scan the player's injuries and pick the first with days_remaining > 0
-      to treat as the active injury (same idea as in /clubs/.../squad).
+    Returns counts of players by availability status for a given club.
+    Suspended players include an array of matches_remaining values.
     """
-    counts = {"injured": 0, "rehab": 0, "tired": 0, "suspended": 0, "ok": 0}
+    # Instead of a simple int for suspended, store count and matches_remaining list
+    counts = {
+        "injured": 0,
+        "rehab": 0,
+        "tired": 0,
+        "suspended": {"count": 0, "matches_remaining": []},
+        "ok": 0
+    }
 
-    # Fetch all players for this club
     players = session.exec(select(Player).where(Player.club_id == club_id)).all()
 
     for p in players:
-        # Default assumption
-        status = "ok"
-        
-                # Suspension first
-        if get_active_suspension(p):
-            status = "suspended"
-        else:
-            # (existing injury and energy logic remains)
-            ...
-        # 1) Check for an active injury
-        active_injury = None
-        if getattr(p, "injuries", None):
-            for inj in p.injuries:
-                # "Active" is defined as: still has days remaining
-                if inj.days_remaining > 0:
-                    active_injury = inj
-                    break
+        status = compute_player_availability(p)
 
-        if active_injury:
-            # Distinguish between "injured" (pre-rehab) and "rehab" (late recovery)
-            if active_injury.days_remaining <= active_injury.rehab_start:
-                status = "rehab"
-            else:
-                status = "injured"
+        if status == "suspended":
+            sus = get_active_suspension(p)
+            counts["suspended"]["count"] += 1
+            if sus:
+                counts["suspended"]["matches_remaining"].append(sus.matches_remaining)
         else:
-            # 2) No active injury → check energy for "tired"
-            if p.energy < LOW_ENERGY_THRESHOLD:
-                status = "tired"
-            # 3) Suspensions are not implemented yet → remains "ok"
-
-        counts[status] += 1
+            counts[status] += 1
 
     return counts
+
 
 
 # =========================================
