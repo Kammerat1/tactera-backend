@@ -9,9 +9,65 @@ from tactera_backend.services.generate_fixtures import generate_fixtures_for_lea
 from tactera_backend.core.database import get_db
 from tactera_backend.core.match_sim import simulate_match
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from tactera_backend.models.player_model import Player
+from tactera_backend.core.injury_config import LOW_ENERGY_THRESHOLD
 
 router = APIRouter()
+
+# ---------------------------------------------
+# Availability helper for fixture list badges
+# ---------------------------------------------
+def compute_availability_counts(session: Session, club_id: int) -> dict:
+    """
+    Computes availability summary for a club's squad.
+    Returns counts for: injured, rehab, tired, suspended, ok.
+
+    Rules:
+    - injured: player has an active injury (days_remaining > rehab_start)
+    - rehab: player has an active injury and is in the rehab phase
+             (days_remaining > 0 AND days_remaining <= rehab_start)
+    - tired: player has NO active injury and energy < LOW_ENERGY_THRESHOLD
+    - suspended: currently not implemented in backend -> always 0
+    - ok: everyone else (no active injury and not tired)
+
+    Notes:
+    - We scan the player's injuries and pick the first with days_remaining > 0
+      to treat as the active injury (same idea as in /clubs/.../squad).
+    """
+    counts = {"injured": 0, "rehab": 0, "tired": 0, "suspended": 0, "ok": 0}
+
+    # Fetch all players for this club
+    players = session.exec(select(Player).where(Player.club_id == club_id)).all()
+
+    for p in players:
+        # Default assumption
+        status = "ok"
+
+        # 1) Check for an active injury
+        active_injury = None
+        if getattr(p, "injuries", None):
+            for inj in p.injuries:
+                # "Active" is defined as: still has days remaining
+                if inj.days_remaining > 0:
+                    active_injury = inj
+                    break
+
+        if active_injury:
+            # Distinguish between "injured" (pre-rehab) and "rehab" (late recovery)
+            if active_injury.days_remaining <= active_injury.rehab_start:
+                status = "rehab"
+            else:
+                status = "injured"
+        else:
+            # 2) No active injury → check energy for "tired"
+            if p.energy < LOW_ENERGY_THRESHOLD:
+                status = "tired"
+            # 3) Suspensions are not implemented yet → remains "ok"
+
+        counts[status] += 1
+
+    return counts
+
 
 # =========================================
 # GET FIXTURES FOR A LEAGUE
@@ -47,11 +103,39 @@ def get_fixtures(league_id: int, session: Session = Depends(get_session)):
         .order_by(Match.round_number, Match.match_time)
     ).all()
 
+    # Build a lightweight, frontend-friendly payload
+    fixtures_payload = []
+    for fx in fixtures:
+        # Fetch club names for convenience (frontend can show them directly)
+        home_club = session.get(Club, fx.home_club_id)
+        away_club = session.get(Club, fx.away_club_id)
+
+        # Compute availability summaries for each side
+        home_avail = compute_availability_counts(session, fx.home_club_id)
+        away_avail = compute_availability_counts(session, fx.away_club_id)
+
+        fixtures_payload.append({
+            "fixture_id": fx.id,
+            "round_number": fx.round_number,
+            "match_time": fx.match_time,
+            "home_club_id": fx.home_club_id,
+            "home_club_name": home_club.name if home_club else None,
+            "away_club_id": fx.away_club_id,
+            "away_club_name": away_club.name if away_club else None,
+            "home_availability": home_avail,   # {injured, rehab, tired, suspended, ok}
+            "away_availability": away_avail,   # {injured, rehab, tired, suspended, ok}
+            # Consider the match "played" if both goal values exist
+            "played": (fx.home_goals is not None and fx.away_goals is not None),
+            "home_goals": fx.home_goals,
+            "away_goals": fx.away_goals,
+        })
+
     return {
         "league": league.name,
         "season_number": season.season_number,
-        "fixtures": fixtures
+        "fixtures": fixtures_payload
     }
+
 
 # =========================================
 # GET LEAGUE STANDINGS
