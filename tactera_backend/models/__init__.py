@@ -36,3 +36,5 @@ from .stadium_model import Stadium, StadiumPart
 # Suspension
 from .suspension_model import Suspension
 
+# Formation system
+from .formation_model import FormationTemplate, ClubFormation, FormationTemplateRead, ClubFormationRead, FormationUpdateRequest
