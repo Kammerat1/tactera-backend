@@ -15,6 +15,7 @@ from tactera_backend.core.injury_generator import calculate_injury_risk, generat
 from tactera_backend.core.injury_config import REINJURY_MULTIPLIER
 from tactera_backend.core.config import TEST_MODE  # ✅ Ensure TEST_MODE is imported
 from tactera_backend.models.suspension_model import Suspension
+from tactera_backend.models.formation_model import ClubFormation, FormationTemplate
 
 # =========================================
 # 🟨🟥 Booking & Suspension Configuration
@@ -97,6 +98,108 @@ def build_bookings_payload(home_data: dict, away_data: dict) -> dict:
         "away": expand(away_data),
     }
 
+async def get_club_starting_lineup(db: AsyncSession, club_id: int) -> dict:
+    """
+    Get a club's starting 11 based on their formation and player assignments.
+    Returns formation info and selected players.
+    """
+    # Get the club's active formation
+    result = await db.execute(
+        select(ClubFormation).where(
+            ClubFormation.club_id == club_id,
+            ClubFormation.is_active == True
+        )
+    )
+    club_formation = result.scalar_one_or_none()
+    
+    if not club_formation or not club_formation.player_assignments:
+        # No formation set - return empty
+        return {
+            "has_formation": False,
+            "formation_name": "No Formation Set",
+            "selected_players": [],
+            "tactics": {
+                "mentality": 5,
+                "pressing": 5,
+                "tempo": 5
+            }
+        }
+    
+    # Get formation template details
+    template = await db.get(FormationTemplate, club_formation.formation_template_id)
+    
+    # Get the assigned players
+    player_ids = list(club_formation.player_assignments.values())
+    if player_ids:
+        result = await db.execute(
+            select(Player).where(Player.id.in_(player_ids))
+        )
+        players = result.scalars().all()
+        player_dict = {p.id: p for p in players}
+        
+        selected_players = []
+        for position, player_id in club_formation.player_assignments.items():
+            if player_id in player_dict:
+                player = player_dict[player_id]
+                selected_players.append({
+                    "position": position,
+                    "player_id": player.id,
+                    "player": player,
+                    "role": template.positions.get(position, {}).get("role", "Unknown") if template else "Unknown"
+                })
+    else:
+        selected_players = []
+    
+    return {
+        "has_formation": True,
+        "formation_name": template.name if template else "Unknown Formation",
+        "formation_template": template,
+        "selected_players": selected_players,
+        "tactics": {
+            "mentality": club_formation.mentality,
+            "pressing": club_formation.pressing,
+            "tempo": club_formation.tempo
+        },
+        "captain_id": club_formation.captain_id,
+        "penalty_taker_id": club_formation.penalty_taker_id,
+        "free_kick_taker_id": club_formation.free_kick_taker_id
+    }
+    
+def validate_formation_for_match(lineup: dict) -> dict:
+    """
+    Validate that a formation has the minimum required players for a match.
+    Returns validation status and any issues.
+    """
+    if not lineup["has_formation"]:
+        return {
+            "is_valid": False,
+            "issues": ["No formation set"],
+            "can_play": False
+        }
+    
+    selected_players = lineup["selected_players"]
+    
+    if len(selected_players) < 11:
+        return {
+            "is_valid": False,
+            "issues": [f"Only {len(selected_players)} players assigned, need 11"],
+            "can_play": len(selected_players) >= 7  # Minimum to play a match
+        }
+    
+    # Check for goalkeeper
+    has_goalkeeper = any(p["position"] == "GK" for p in selected_players)
+    if not has_goalkeeper:
+        return {
+            "is_valid": False,
+            "issues": ["No goalkeeper assigned"],
+            "can_play": False
+        }
+    
+    return {
+        "is_valid": True,
+        "issues": [],
+        "can_play": True
+    }
 
 async def simulate_match(db: AsyncSession, fixture_id: int):
     """
@@ -118,22 +221,42 @@ async def simulate_match(db: AsyncSession, fixture_id: int):
     home_club = await db.get(Club, fixture.home_club_id)
     away_club = await db.get(Club, fixture.away_club_id)
 
-    # 3️⃣ Fetch players (exclude fully injured - days_remaining > 0)
-    home_players_result = await db.execute(
-        select(Player).where(
-            Player.club_id == home_club.id,
-            ~Player.id.in_(select(Injury.player_id).where(Injury.days_remaining > 0))
+    # 3️⃣ Fetch players using formation system
+    home_lineup = await get_club_starting_lineup(db, fixture.home_club_id)
+    away_lineup = await get_club_starting_lineup(db, fixture.away_club_id)
+    
+    # Get players for the match (either from formation or all available)
+    if home_lineup["has_formation"] and home_lineup["selected_players"]:
+        home_players = [p["player"] for p in home_lineup["selected_players"]]
+        if TEST_MODE:
+            print(f"   🏟️ Home team using {home_lineup['formation_name']} formation with {len(home_players)} players")
+    else:
+        # Fallback: use all available players (exclude fully injured)
+        home_players_result = await db.execute(
+            select(Player).where(
+                Player.club_id == home_club.id,
+                ~Player.id.in_(select(Injury.player_id).where(Injury.days_remaining > 0))
+            )
         )
-    )
-    home_players = home_players_result.scalars().all()
-
-    away_players_result = await db.execute(
-        select(Player).where(
-            Player.club_id == away_club.id,
-            ~Player.id.in_(select(Injury.player_id).where(Injury.days_remaining > 0))
+        home_players = home_players_result.scalars().all()
+        if TEST_MODE:
+            print(f"   ⚠️ Home team has no formation set, using all available players ({len(home_players)})")
+    
+    if away_lineup["has_formation"] and away_lineup["selected_players"]:
+        away_players = [p["player"] for p in away_lineup["selected_players"]]
+        if TEST_MODE:
+            print(f"   🏟️ Away team using {away_lineup['formation_name']} formation with {len(away_players)} players")
+    else:
+        # Fallback: use all available players (exclude fully injured)
+        away_players_result = await db.execute(
+            select(Player).where(
+                Player.club_id == away_club.id,
+                ~Player.id.in_(select(Injury.player_id).where(Injury.days_remaining > 0))
+            )
         )
-    )
-    away_players = away_players_result.scalars().all()
+        away_players = away_players_result.scalars().all()
+        if TEST_MODE:
+            print(f"   ⚠️ Away team has no formation set, using all available players ({len(away_players)})")
 
     # 4️⃣ Stadium pitch quality
     stadium_result = await db.execute(select(Stadium).where(Stadium.club_id == home_club.id))
@@ -313,7 +436,22 @@ async def simulate_match(db: AsyncSession, fixture_id: int):
         "played_at": fixture.match_time,
         "injuries": injuries,
         "bookings": bookings_payload,  # Now includes minute stamps
-        "send_offs": send_offs  # NEW: List of players sent off with minutes
+        "send_offs": send_offs,  # NEW: List of players sent off with minutes
+        
+        "formations": {
+            "home": {
+                "formation_name": home_lineup["formation_name"],
+                "has_formation": home_lineup["has_formation"],
+                "tactics": home_lineup["tactics"],
+                "players_used": len(home_players)
+            },
+            "away": {
+                "formation_name": away_lineup["formation_name"],
+                "has_formation": away_lineup["has_formation"],
+                "tactics": away_lineup["tactics"],
+                "players_used": len(away_players)
+            }
+        }
     }
 
 
