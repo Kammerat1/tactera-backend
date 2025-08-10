@@ -8,6 +8,7 @@ from tactera_backend.routes.substitution_routes import validate_substitution_req
 from tactera_backend.core.database import get_session, sync_engine
 from tactera_backend.models.formation_model import MatchSquad, MatchSubstitution, SubstitutionRequest
 from tactera_backend.routes.substitution_routes import validate_substitution_request
+from tactera_backend.models.contract_model import PlayerContract
 
 router = APIRouter()
 
@@ -949,4 +950,45 @@ def debug_create_free_agents(
     return {
         "message": f"Created {count} free agents for testing",
         "free_agents": free_agents_created
+    }
+    
+@router.post("/debug/expire-contracts")
+def debug_expire_contracts(
+    count: int = 3,
+    session: Session = Depends(get_session)
+):
+    """
+    DEBUG: Expire some player contracts to create free agents.
+    """
+    from tactera_backend.models.contract_model import PlayerContract
+    from datetime import date, timedelta
+    
+    # Get some random contracts to expire
+    contracts = session.exec(select(PlayerContract).limit(count * 2)).all()
+    
+    expired_players = []
+    expired_count = 0
+    
+    for contract in contracts:
+        if expired_count >= count:
+            break
+            
+        # Set contract to have expired today
+        contract.contract_expires = date.today()
+        session.add(contract)
+        
+        player = session.get(Player, contract.player_id)
+        if player:
+            expired_players.append({
+                "id": player.id,
+                "name": f"{player.first_name} {player.last_name}",
+                "expired_date": contract.contract_expires
+            })
+            expired_count += 1
+    
+    session.commit()
+    
+    return {
+        "message": f"Expired {expired_count} contracts to create contract expiry auctions",
+        "expired_players": expired_players
     }

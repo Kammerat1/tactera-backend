@@ -81,15 +81,34 @@ async def complete_single_auction(db: AsyncSession, listing: TransferListing) ->
     winning_bid = result.scalar_one_or_none()
     
     if not winning_bid:
-        # No bids - auction failed
-        listing.status = AuctionStatus.EXPIRED
-        db.add(listing)
+        # No bids - check if this was a contract expiry auction
+        player = await db.get(Player, listing.player_id)
         
-        return {
-            "listing_id": listing.id,
-            "status": "expired",
-            "reason": "No bids received"
-        }
+        if listing.asking_price == 1 and listing.auction_duration_minutes == 1440:
+            # This was a contract expiry auction with no bids - player stays as free agent
+            # (Player is already club_id = None from when contract expired)
+            
+            listing.status = AuctionStatus.EXPIRED
+            db.add(listing)
+            
+            return {
+                "listing_id": listing.id,
+                "status": "expired", 
+                "reason": "No bids received - player remained free agent",
+                "player_id": player.id,
+                "player_name": f"{player.first_name} {player.last_name}",
+                "became_free_agent": True
+            }
+        else:
+            # Regular auction with no bids
+            listing.status = AuctionStatus.EXPIRED
+            db.add(listing)
+            
+            return {
+                "listing_id": listing.id,
+                "status": "expired",
+                "reason": "No bids received"
+            }
     
     # Get player and clubs
     player = await db.get(Player, listing.player_id)
@@ -203,7 +222,7 @@ async def run_transfer_completion_loop():
                 result = await process_expired_auctions(session)
                 
                 if result["completed_transfers"] > 0 or result["failed_auctions"] > 0:
-                    print(f"[{datetime.utcnow()}] Transfer completion: {result['completed_transfers']} completed, {result['failed_auctions']} failed")
+                    print(f"[{datetime.utcnow()}] Transfer completion: {result['completed_transfers']} completed, {result['failed_auctions']} expired")
                 
         except Exception as e:
             print(f"[{datetime.utcnow()}] Transfer completion error: {str(e)}")

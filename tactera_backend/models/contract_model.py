@@ -25,17 +25,8 @@ def is_free_agent(player_id: int, session) -> bool:
     if player.club_id is None:
         return True
     
-    # If player has a club, check if they have an active contract
-    contract = session.exec(
-        select(PlayerContract).where(PlayerContract.player_id == player_id)
-    ).first()
-    
-    if not contract:
-        return True
-    
-    # Check if contract has expired
-    from datetime import date
-    return contract.contract_expires < date.today()
+    # If player has a club, they're not a free agent
+    return False
 
 class ContractPreference(str, Enum):
     """Player preferences for contract terms"""
