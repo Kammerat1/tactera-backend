@@ -41,12 +41,17 @@ async def on_startup():
             seed_all()  # ✅ Uses sync engine only
         else:
             print("✅ Database already seeded. Skipping auto-seed.")
-            
+
 import asyncio
 from tactera_backend.services.game_tick_service import process_daily_tick
+from tactera_backend.services.transfer_completion_service import run_transfer_completion_loop
 
 @app.on_event("startup")
-async def start_daily_tick_loop():
+async def start_background_tasks():
+    """
+    Start background tasks for game systems.
+    """
+    # Daily tick loop (existing)
     async def daily_tick_loop():
         tz = timezone(timedelta(hours=2))  # ✅ UTC+2
 
@@ -65,8 +70,12 @@ async def start_daily_tick_loop():
 
             # Wait 24 hours for next tick
             await asyncio.sleep(86400)
+    
+    # Start background tasks
     asyncio.create_task(daily_tick_loop())
-
+    asyncio.create_task(run_transfer_completion_loop())  # NEW: Transfer completion
+    
+    print("🔄 Background tasks started: Daily tick + Transfer completion")
 
 
 # Routers
