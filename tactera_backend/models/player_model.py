@@ -1,9 +1,12 @@
+# tactera_backend/models/player_model.py
 from typing import Optional, List, TYPE_CHECKING
 from sqlmodel import SQLModel, Field, Relationship
+from tactera_backend.models.club_model import Club
 
 if TYPE_CHECKING:
-    from .injury_model import Injury  # ✅ forward reference for Injury
-    from .suspension_model import Suspension  # ✅ forward reference for Suspension
+    from .injury_model import Injury
+    from .suspension_model import Suspension
+    from .contract_model import PlayerContract  # NEW
 
 
 class Player(SQLModel, table=True):
@@ -30,20 +33,19 @@ class Player(SQLModel, table=True):
 
     stats: List["PlayerStat"] = Relationship(back_populates="player")
 
-    # ✅ NEW: Relationship to injuries
+    # Injury and suspension relationships
     injuries: List["Injury"] = Relationship(back_populates="player")
-    
-    # ✅ NEW: Relationship to suspensions
-    # A player can have zero or more Suspension entries.
-    # If any has matches_remaining > 0, the player is currently suspended.
     suspensions: List["Suspension"] = Relationship(back_populates="player")
+    
+    # NEW: Contract relationship
+    current_contract: Optional["PlayerContract"] = Relationship(back_populates="player")
 
 
 # -------------------------------
 # Pydantic schemas for API responses
 # -------------------------------
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional
 
 class InjuryRead(BaseModel):
@@ -58,12 +60,21 @@ class InjuryRead(BaseModel):
     fit_for_matches: bool
 
     class Config:
-        from_attributes = True  # ✅ Pydantic v2 equivalent of orm_mode
+        from_attributes = True
 
-
+# NEW: Contract schema for player responses
+class ContractSummary(BaseModel):
+    """Minimal contract info for player responses"""
+    daily_wage: int
+    contract_expires: date
+    days_remaining: int
+    auto_generated: bool
+    
+    class Config:
+        from_attributes = True
 
 class PlayerRead(BaseModel):
-    """Schema for returning player details with optional active injury info."""
+    """Schema for returning player details with optional active injury and contract info."""
     id: int
     first_name: str
     last_name: str
@@ -74,9 +85,9 @@ class PlayerRead(BaseModel):
     preferred_foot: str
     is_goalkeeper: bool
 
-    # ✅ Add active injury (None if healthy)
-    active_injury: Optional[InjuryRead] = None  
+    # Status information
+    active_injury: Optional[InjuryRead] = None
+    current_contract: Optional[ContractSummary] = None  # NEW
 
     class Config:
-        from_attributes = True  # ✅ Pydantic v2 equivalent of orm_mode
-
+        from_attributes = True
