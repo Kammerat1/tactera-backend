@@ -3,6 +3,8 @@ from tactera_backend.models.club_model import Club
 from tactera_backend.models.player_model import Player
 from tactera_backend.core.database import sync_engine
 import random
+from tactera_backend.models.contract_model import PlayerContract
+from datetime import date, timedelta
 
 PLAYERS_PER_CLUB = 18
 
@@ -58,14 +60,32 @@ def seed_players():
                 print(f"⚠️ Club '{club.name}' already has players. Skipping.")
                 continue
 
+            new_players = []
             for i in range(PLAYERS_PER_CLUB):
                 player = generate_random_player(i + 1, club.id)
                 session.add(player)
+                new_players.append(player)
 
-            print(f"✅ Added {PLAYERS_PER_CLUB} players to '{club.name}'")
+            session.commit()  # Commit players first to get IDs
+            
+            # Refresh each player individually to get their IDs
+            for player in new_players:
+                session.refresh(player)  # ✅ Use refresh() on individual objects
+
+            # Create contracts for all new players
+            for player in new_players:
+                contract = PlayerContract(
+                    player_id=player.id,
+                    club_id=club.id,
+                    daily_wage=random.randint(100, 300),
+                    contract_expires=date.today() + timedelta(days=random.randint(28, 84)),
+                    auto_generated=False
+                )
+                session.add(contract)
+
+            print(f"✅ Added {PLAYERS_PER_CLUB} players with contracts to '{club.name}'")
 
         session.commit()
-        print("✅ Player seeding complete!")
 
 if __name__ == "__main__":
     seed_players()

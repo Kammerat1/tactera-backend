@@ -3,10 +3,11 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from datetime import datetime, timedelta, date
 
-from tactera_backend.core.database import get_session
+from tactera_backend.core.database import get_session, get_db
 from tactera_backend.models.contract_model import (
     PlayerContract, TransferListing, TransferBid, ContractPreference,
     TransferType, AuctionStatus, ContractRead, TransferListingRead,
@@ -245,20 +246,35 @@ def get_transfer_listing_details(
     minutes_remaining = max(0, int((listing.auction_end - now).total_seconds() / 60))
     
     return {
-        "listing": TransferListingRead.from_orm(listing).dict() | {"minutes_remaining": minutes_remaining},
-        "player": {
-            "id": player.id,
-            "name": f"{player.first_name} {player.last_name}",
-            "age": player.age,
-            "position": player.position,
-            "energy": player.energy
-        },
-        "selling_club": {
-            "id": selling_club.id,
-            "name": selling_club.name
-        } if selling_club else None,
-        "bids": [TransferBidRead.from_orm(bid) for bid in bids[:10]]  # Last 10 bids
-    }
+    "listing": {
+        "id": listing.id,
+        "player_id": listing.player_id,
+        "club_id": listing.club_id,
+        "transfer_type": listing.transfer_type.value,
+        "asking_price": listing.asking_price,
+        "auction_end": listing.auction_end,
+        "status": listing.status.value,
+        "current_bid": listing.current_bid,
+        "current_bidder_id": listing.current_bidder_id,
+        "bid_count": listing.bid_count,
+        "minutes_remaining": minutes_remaining,
+        "winning_bid": listing.winning_bid,
+        "winning_club_id": listing.winning_club_id,
+        "transfer_completed": listing.transfer_completed
+    },
+    "player": {
+        "id": player.id,
+        "name": f"{player.first_name} {player.last_name}",
+        "age": player.age,
+        "position": player.position,
+        "energy": player.energy
+    },
+    "selling_club": {
+        "id": selling_club.id,
+        "name": selling_club.name
+    } if selling_club else None,
+    "bids": [TransferBidRead.from_orm(bid) for bid in bids[:10]]  # Last 10 bids
+}
 
 
 # ==========================================
@@ -488,7 +504,7 @@ def place_bid(
 # CONTRACT MANAGEMENT
 # ==========================================
 
-@router.get("/contracts/{player_id}", response_model=ContractRead)
+@router.get("/contracts/{player_id}")
 def get_player_contract(
     player_id: int,
     session: Session = Depends(get_session)
@@ -507,10 +523,52 @@ def get_player_contract(
     today = date.today()
     days_remaining = (contract.contract_expires - today).days
     
-    contract_data = ContractRead.from_orm(contract)
-    contract_data.days_remaining = days_remaining
+    return {
+        "player_id": contract.player_id,
+        "club_id": contract.club_id,
+        "daily_wage": contract.daily_wage,
+        "contract_start": contract.contract_start,
+        "contract_expires": contract.contract_expires,
+        "days_remaining": days_remaining,
+        "preference_type": contract.preference_type.value,
+        "auto_generated": contract.auto_generated
+    }
+
+
+# ==========================================
+# TRANSFER COMPLETION (HELPER ENDPOINT)
+# ==========================================
+
+@router.post("/complete/{listing_id}")
+async def complete_transfer(
+    listing_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Complete a transfer when auction ends.
+    This would normally be called by a background job.
+    """
+    from tactera_backend.services.transfer_completion_service import complete_single_auction
     
-    return contract_data
+    listing = await db.get(TransferListing, listing_id)
+    if not listing:
+        raise HTTPException(status_code=404, detail="Transfer listing not found")
+    
+    if listing.status != AuctionStatus.ACTIVE:
+        raise HTTPException(status_code=400, detail="Transfer is not active")
+    
+    # Check if auction has ended
+    if datetime.utcnow() < listing.auction_end:
+        raise HTTPException(status_code=400, detail="Auction has not ended yet")
+    
+    try:
+        result = await complete_single_auction(db, listing)
+        await db.commit()
+        return result
+    except Exception as e:
+        await db.rollback()
+        print(f"Transfer completion error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Transfer completion failed: {str(e)}")
 
 
 @router.post("/contracts/offer")
@@ -549,91 +607,3 @@ def offer_contract(
         }
     else:
         raise HTTPException(status_code=404, detail="Player must have an existing contract to renew")
-
-
-# ==========================================
-# TRANSFER COMPLETION (HELPER ENDPOINT)
-# ==========================================
-
-@router.post("/complete/{listing_id}")
-def complete_transfer(
-    listing_id: int,
-    session: Session = Depends(get_session)
-):
-    """
-    Complete a transfer when auction ends.
-    This would normally be called by a background job.
-    """
-    listing = session.get(TransferListing, listing_id)
-    if not listing:
-        raise HTTPException(status_code=404, detail="Transfer listing not found")
-    
-    if listing.status != AuctionStatus.ACTIVE:
-        raise HTTPException(status_code=400, detail="Transfer is not active")
-    
-    # Check if auction has ended
-    if datetime.utcnow() < listing.auction_end:
-        raise HTTPException(status_code=400, detail="Auction has not ended yet")
-    
-    # Get winning bid
-    winning_bid = session.exec(
-        select(TransferBid).where(
-            TransferBid.transfer_listing_id == listing_id,
-            TransferBid.is_winning == True
-        )
-    ).first()
-    
-    if not winning_bid:
-        # No bids - auction failed
-        listing.status = AuctionStatus.EXPIRED
-        session.add(listing)
-        session.commit()
-        
-        return {
-            "message": "Auction expired with no bids",
-            "status": "expired"
-        }
-    
-    # Transfer the player
-    player = session.get(Player, listing.player_id)
-    old_club_id = player.club_id
-    new_club_id = winning_bid.bidding_club_id
-    
-    # Update player's club
-    player.club_id = new_club_id
-    
-    # Create new 3-day auto-contract
-    old_contract = session.exec(
-        select(PlayerContract).where(PlayerContract.player_id == player.id)
-    ).first()
-    
-    if old_contract:
-        session.delete(old_contract)
-    
-    new_contract = PlayerContract(
-        player_id=player.id,
-        club_id=new_club_id,
-        daily_wage=100,  # Default wage for 3-day contract
-        contract_expires=date.today() + timedelta(days=3),
-        auto_generated=True
-    )
-    
-    # Update listing status
-    listing.status = AuctionStatus.COMPLETED
-    listing.winning_bid = winning_bid.bid_amount
-    listing.winning_club_id = new_club_id
-    listing.transfer_completed = True
-    
-    session.add(player)
-    session.add(new_contract)
-    session.add(listing)
-    session.commit()
-    
-    return {
-        "message": "Transfer completed successfully",
-        "player_id": player.id,
-        "from_club_id": old_club_id,
-        "to_club_id": new_club_id,
-        "transfer_fee": winning_bid.bid_amount,
-        "status": "completed"
-    }

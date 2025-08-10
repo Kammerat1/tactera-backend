@@ -107,7 +107,6 @@ async def complete_single_auction(db: AsyncSession, listing: TransferListing) ->
         }
     
     # Check squad limits for buying club
-    # Count current players in buying club
     current_squad_result = await db.execute(
         select(Player).where(Player.club_id == buying_club.id)
     )
@@ -118,8 +117,8 @@ async def complete_single_auction(db: AsyncSession, listing: TransferListing) ->
         select(TransferListing).where(
             TransferListing.club_id == buying_club.id,
             TransferListing.status == AuctionStatus.ACTIVE,
-            TransferListing.current_bid > 0,  # Has active bids
-            TransferListing.auction_end <= datetime.utcnow() + timedelta(hours=1)  # Ends soon
+            TransferListing.current_bid > 0,
+            TransferListing.auction_end <= datetime.utcnow() + timedelta(hours=1)
         )
     )
     pending_sales = len(pending_sales_result.scalars().all())
@@ -127,7 +126,6 @@ async def complete_single_auction(db: AsyncSession, listing: TransferListing) ->
     effective_squad_size = current_squad_size - pending_sales
     
     if effective_squad_size >= 25:
-        # Check if this would exceed the temporary 26 limit
         if effective_squad_size >= 26:
             listing.status = AuctionStatus.CANCELLED
             db.add(listing)
@@ -144,44 +142,45 @@ async def complete_single_auction(db: AsyncSession, listing: TransferListing) ->
     
     # Transfer the player
     player.club_id = new_club_id
-    
-    # Handle old contract
+
+    # Handle contract - update existing or create new
     old_contract_result = await db.execute(
         select(PlayerContract).where(PlayerContract.player_id == player.id)
     )
     old_contract = old_contract_result.scalar_one_or_none()
-    
+
     if old_contract:
-        # Delete old contract
-        await db.delete(old_contract)
-    
-    # Create new 3-day auto-contract
-    new_contract = PlayerContract(
-        player_id=player.id,
-        club_id=new_club_id,
-        daily_wage=100,  # Default wage for auto-contract
-        contract_expires=date.today() + timedelta(days=3),
-        auto_generated=True
-    )
-    
+        # Update existing contract instead of creating new one
+        old_contract.club_id = new_club_id
+        old_contract.daily_wage = 100
+        old_contract.contract_expires = date.today() + timedelta(days=3)
+        old_contract.auto_generated = True
+        old_contract.updated_at = datetime.utcnow()
+        db.add(old_contract)
+        print(f"Updated existing contract for player {player.id}")
+    else:
+        # Create new contract only if none exists
+        new_contract = PlayerContract(
+            player_id=player.id,
+            club_id=new_club_id,
+            daily_wage=100,
+            contract_expires=date.today() + timedelta(days=3),
+            auto_generated=True
+        )
+        db.add(new_contract)
+        print(f"Created new contract for player {player.id}")
+
     # Update auction status
     listing.status = AuctionStatus.COMPLETED
     listing.winning_bid = transfer_fee
     listing.winning_club_id = new_club_id
     listing.transfer_completed = True
     listing.updated_at = datetime.utcnow()
-    
-    # Apply transfer fee (simplified for now - just subtract from buying club)
-    # TODO: Add proper financial system
-    # buying_club.balance -= transfer_fee
-    # selling_club.balance += transfer_fee * 0.95  # 5% transaction fee
-    
+
     # Save all changes
     db.add(player)
-    db.add(new_contract)
     db.add(listing)
-    # db.add(buying_club)  # Uncomment when financial system exists
-    # db.add(selling_club)
+    # Contract is already added in the if/else block above
     
     return {
         "listing_id": listing.id,
@@ -193,7 +192,6 @@ async def complete_single_auction(db: AsyncSession, listing: TransferListing) ->
         "transfer_fee": transfer_fee,
         "winning_bid_id": winning_bid.id
     }
-
 
 async def run_transfer_completion_loop():
     """

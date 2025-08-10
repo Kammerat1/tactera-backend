@@ -859,3 +859,38 @@ async def debug_substitution_validation(
             "remaining_player_changes": validation.remaining_player_changes
         }
     }
+    
+@router.post("/debug/create-contracts-for-all-players")
+def debug_create_contracts(session: Session = Depends(get_session)):
+    """
+    DEBUG: Create contracts for all players who don't have one.
+    """
+    from tactera_backend.models.contract_model import PlayerContract
+    from datetime import date, timedelta
+    import random
+    
+    # Get all players without contracts
+    players_without_contracts = session.exec(
+        select(Player).where(
+            ~Player.id.in_(select(PlayerContract.player_id))
+        )
+    ).all()
+    
+    contracts_created = 0
+    for player in players_without_contracts:
+        contract = PlayerContract(
+            player_id=player.id,
+            club_id=player.club_id,
+            daily_wage=random.randint(100, 300),
+            contract_expires=date.today() + timedelta(days=random.randint(30, 365)),
+            auto_generated=False
+        )
+        session.add(contract)
+        contracts_created += 1
+    
+    session.commit()
+    
+    return {
+        "message": f"Created {contracts_created} contracts",
+        "contracts_created": contracts_created
+    }
