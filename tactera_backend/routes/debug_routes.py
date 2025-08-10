@@ -894,3 +894,59 @@ def debug_create_contracts(session: Session = Depends(get_session)):
         "message": f"Created {contracts_created} contracts",
         "contracts_created": contracts_created
     }
+    
+@router.post("/debug/create-free-agents")
+def debug_create_free_agents(
+    count: int = 5,
+    session: Session = Depends(get_session)
+):
+    """
+    DEBUG: Create some players without contracts to test the free agent system.
+    """
+    from tactera_backend.models.player_model import Player
+    from tactera_backend.models.contract_model import PlayerContract
+    import random
+    
+    positions = ["GK", "LB", "CB", "RB", "CDM", "CM", "CAM", "LW", "RW", "ST"]
+    preferred_feet = ["left", "right", "both"]
+    
+    free_agents_created = []
+    
+    for i in range(count):
+        # Create a player without a club (club_id = None won't work, so we'll use club_id = 1 then remove contract)
+        position = random.choice(positions)
+        is_goalkeeper = position == "GK"
+        
+        player = Player(
+            first_name=f"Free{i+1}",
+            last_name="Agent",
+            age=random.randint(18, 32),
+            position=position,
+            height_cm=random.randint(165, 195),
+            weight_kg=random.randint(65, 85),
+            preferred_foot=random.choice(preferred_feet),
+            is_goalkeeper=is_goalkeeper,
+            ambition=random.randint(40, 90),
+            consistency=random.randint(30, 85),
+            injury_proneness=random.randint(15, 50),
+            potential=random.randint(60, 120),
+            club_id=None,  # No club - true free agent!
+            energy=random.randint(80, 100)
+        )
+        
+        session.add(player)
+        session.commit()
+        session.refresh(player)
+        
+        # Don't create a contract - this makes them a free agent!
+        free_agents_created.append({
+            "id": player.id,
+            "name": f"{player.first_name} {player.last_name}",
+            "position": player.position,
+            "age": player.age
+        })
+    
+    return {
+        "message": f"Created {count} free agents for testing",
+        "free_agents": free_agents_created
+    }

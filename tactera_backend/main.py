@@ -18,6 +18,7 @@ from tactera_backend.routes.debug_routes import router as debug_router
 from tactera_backend.routes.formation_routes import router as formation_router
 from tactera_backend.routes.substitution_routes import router as substitution_router
 from tactera_backend.routes.transfer_routes import router as transfer_router
+from tactera_backend.routes.free_agent_routes import router as free_agent_router
 
 app = FastAPI()
 
@@ -90,3 +91,4 @@ app.include_router(formation_router, prefix="/formations", tags=["Formations"])
 app.include_router(substitution_router, prefix="/substitutions", tags=["Substitutions"])
 app.include_router(transfer_router, prefix="/transfers", tags=["Transfers"])
 app.include_router(debug_router, tags=["Debug"])
+app.include_router(free_agent_router, prefix="/free-agents", tags=["Free Agents"])

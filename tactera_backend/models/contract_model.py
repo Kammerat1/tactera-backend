@@ -9,6 +9,34 @@ from enum import Enum
 from tactera_backend.models.club_model import Club
 from tactera_backend.models.player_model import Player
 
+def is_free_agent(player_id: int, session) -> bool:
+    """
+    Check if a player is a free agent (no club or no active contract).
+    """
+    from sqlmodel import select
+    from tactera_backend.models.player_model import Player
+    
+    # Get the player
+    player = session.get(Player, player_id)
+    if not player:
+        return False
+    
+    # If player has no club, they're definitely a free agent
+    if player.club_id is None:
+        return True
+    
+    # If player has a club, check if they have an active contract
+    contract = session.exec(
+        select(PlayerContract).where(PlayerContract.player_id == player_id)
+    ).first()
+    
+    if not contract:
+        return True
+    
+    # Check if contract has expired
+    from datetime import date
+    return contract.contract_expires < date.today()
+
 class ContractPreference(str, Enum):
     """Player preferences for contract terms"""
     SECURITY_FOCUSED = "security_focused"  # Prefers longer contracts, lower wages
@@ -133,6 +161,38 @@ class TransferBid(SQLModel, table=True):
 # ==========================================
 # PYDANTIC SCHEMAS FOR API
 # ==========================================
+
+# ==========================================
+# FREE AGENT SCHEMAS
+# ==========================================
+
+class FreeAgentRead(BaseModel):
+    """Schema for displaying free agents"""
+    player_id: int
+    name: str
+    age: int
+    position: str
+    energy: int
+    asking_price: int  # Sign-on fee
+    days_since_free: int
+    
+    class Config:
+        from_attributes = True
+
+class SignFreeAgentRequest(BaseModel):
+    """Schema for signing a free agent"""
+    sign_on_fee: int = Field(ge=1, description="Sign-on fee to offer the player")
+    daily_wage: int = Field(ge=50, le=1000, description="Daily wage to offer")
+    contract_length_days: int = Field(ge=7, le=365, description="Contract length in days")
+
+class SignFreeAgentResponse(BaseModel):
+    """Schema for free agent signing response"""
+    success: bool
+    player_name: str
+    sign_on_fee: int
+    daily_wage: int
+    contract_expires: date
+    message: str
 
 class ContractRead(BaseModel):
     """Schema for returning contract information"""

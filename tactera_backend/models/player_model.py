@@ -28,7 +28,7 @@ class Player(SQLModel, table=True):
     injury_proneness: int
     potential: int  # fixed between 1–200
 
-    club_id: int = Field(foreign_key="club.id")
+    club_id: Optional[int] = Field(default=None, foreign_key="club.id")
     club: Optional["Club"] = Relationship(back_populates="squad")
 
     stats: List["PlayerStat"] = Relationship(back_populates="player")
