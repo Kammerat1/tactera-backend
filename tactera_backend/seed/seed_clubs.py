@@ -13,6 +13,7 @@ from tactera_backend.models.league_model import League
 from tactera_backend.models.training_model import TrainingGround
 import random
 from tactera_backend.models.country_model import Country
+from tactera_backend.core.league_config import league_config
 
 
 def seed_clubs():
@@ -78,12 +79,37 @@ def seed_clubs():
                 
                 # Create clubs for this league
                 for i in range(clubs_needed):
+                    # Calculate starting money based on league reputation
+
+                    # Find country for this league
+                    country = session.exec(
+                        select(Country).where(Country.id == league.country_id)
+                    ).first()
+
+                    # Set starting money based on league reputation
+                    if country and country.name in league_config:
+                        country_config = league_config[country.name]
+                        reputation = country_config.get("reputation", 70)
+                        
+                        # Higher reputation leagues = more money
+                        if reputation >= 90:
+                            starting_money = 200000  # Elite leagues (Germany, Spain, etc.)
+                        elif reputation >= 80:
+                            starting_money = 150000  # Strong leagues (France, Netherlands)
+                        elif reputation >= 70:
+                            starting_money = 100000  # Good leagues (Denmark, Portugal)
+                        else:
+                            starting_money = 75000   # Average leagues (Sweden, Norway)
+                    else:
+                        starting_money = 100000  # Default fallback
+
                     bot_club = Club(
                         name=f"Bot Club {league.id}-{i+1}",
                         league_id=league.id,
                         manager_email=f"bot_{league.id}_{i+1}@bots.tactera",
                         is_bot=True,
-                        trainingground_id=lowest_trainingground.id
+                        trainingground_id=lowest_trainingground.id,
+                        money=starting_money
                     )
                     new_clubs.append(bot_club)
 

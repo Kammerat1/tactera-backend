@@ -15,6 +15,8 @@ class Club(SQLModel, table=True):
     last_training_date: Optional[date] = Field(default=None, nullable=True)
         # Training intensity setting for this club (light|normal|hard)
     training_intensity: str = Field(default="normal")
+    
+    money: int = Field(default=100000, description="Club's current money/budget")
 
     squad: List["Player"] = Relationship(back_populates="club")
     manager: Optional["Manager"] = Relationship(back_populates="club")
