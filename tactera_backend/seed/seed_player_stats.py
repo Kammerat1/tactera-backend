@@ -1,6 +1,8 @@
 from sqlmodel import Session, select
 from tactera_backend.models.player_model import Player
 from tactera_backend.models.player_stat_model import PlayerStat
+from tactera_backend.models.club_model import Club
+from tactera_backend.models.league_model import League
 from tactera_backend.core.database import sync_engine
 import random
 
@@ -12,11 +14,21 @@ STAT_NAMES = [
 
 def seed_player_stats():
     with Session(sync_engine) as session:
-        print("🎯 Starting optimized player stats seeding...")
+        print("🎯 Starting optimized player stats seeding (active leagues only)...")
         
-        # Get all players
-        players = session.exec(select(Player)).all()
-        print(f"📊 Found {len(players)} players")
+        # ✅ ONLY get players from clubs in active leagues
+        players_in_active_leagues = session.exec(
+            select(Player)
+            .join(Club, Player.club_id == Club.id)
+            .join(League, Club.league_id == League.id)
+            .where(League.is_active == True)
+        ).all()
+        
+        print(f"📊 Found {len(players_in_active_leagues)} players in active leagues")
+        
+        if not players_in_active_leagues:
+            print("⚠️ No players found in active leagues. Run seed_players first.")
+            return
         
         # Get all existing stats to avoid duplicates
         existing_stats = session.exec(select(PlayerStat)).all()
@@ -25,7 +37,7 @@ def seed_player_stats():
         
         # Batch create new stats
         new_stats = []
-        for player in players:
+        for player in players_in_active_leagues:
             for stat in STAT_NAMES:
                 if (player.id, stat) not in existing_set:
                     xp_amount = random.randint(0, 300)
@@ -37,12 +49,13 @@ def seed_player_stats():
         
         print(f"➕ Creating {len(new_stats)} new player stats...")
         
-        # Batch insert all at once
+        # ✅ Batch insert all at once
         if new_stats:
             session.add_all(new_stats)
             session.commit()
-        
-        print(f"✅ Player stats seeded: {len(new_stats)} new stats created")
+            print(f"✅ Player stats seeded: {len(new_stats)} new stats created")
+        else:
+            print("✅ All players in active leagues already have stats")
 
 if __name__ == "__main__":
     seed_player_stats()

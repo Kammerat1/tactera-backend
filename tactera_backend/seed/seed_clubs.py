@@ -6,33 +6,77 @@ from tactera_backend.models.training_model import TrainingGround
 import random
 
 
+from sqlmodel import Session, select, func
+from tactera_backend.core.database import sync_engine
+from tactera_backend.models.club_model import Club
+from tactera_backend.models.league_model import League
+from tactera_backend.models.training_model import TrainingGround
+import random
+from tactera_backend.models.country_model import Country
+
+
 def seed_clubs():
-    print("🏟 Starting club seeding...")
+    print("🏟 Starting optimized club seeding (active leagues only)...")
 
     with Session(sync_engine) as session:
-        leagues = session.exec(select(League)).all()
+        # ✅ ONLY get active leagues
+        active_leagues = session.exec(
+            select(League).where(League.is_active == True)
+        ).all()
+        
+        print(f"🎯 Found {len(active_leagues)} active leagues")
 
-        for league in leagues:
-            print(f"⚽ Found league: {league.name} (Country ID: {league.country_id}, Tier: {league.level})")
+        # Get the lowest-level training ground (tier 1, Basic Ground)
+        lowest_trainingground = session.exec(
+            select(TrainingGround).where(TrainingGround.id == 1)
+        ).first()
+
+        if not lowest_trainingground:
+            print("❌ No training ground found! Run seed_traininggrounds first.")
+            return
+
+        # Batch creation for better performance
+        new_clubs = []
+
+        for league in active_leagues:
+            print(f"⚽ Processing active league: {league.name}")
 
             # Count existing clubs in this league
             club_count = session.exec(
                 select(func.count()).select_from(Club).where(Club.league_id == league.id)
             ).one()
 
-            desired_club_count = 16 if league.level == 1 else 14  # Example: top tier has 16, lower has 14
+            # Determine target based on league level
+            if league.level == 1:
+                # Tier 1: Check country system from league config
+                from tactera_backend.core.league_config import league_config
+                
+                # Find the country for this league
+                country = session.exec(
+                    select(Country).where(Country.id == league.country_id)
+                ).first()
+                
+                if country and country.name in league_config:
+                    country_config = league_config[country.name]
+                    # Find the tier 1 league config
+                    tier1_leagues = [l for l in country_config["leagues"] if l["level"] == 1]
+                    if tier1_leagues:
+                        desired_club_count = tier1_leagues[0]["teams"]
+                    else:
+                        desired_club_count = 16  # fallback
+                else:
+                    desired_club_count = 16  # fallback
+            else:
+                # Tier 2+: Use 14 or 16 based on system
+                desired_club_count = 14  # Most tier 2 leagues use 14
+
             print(f"   🏟 {club_count}/{desired_club_count} clubs currently in this league")
             
             if club_count < desired_club_count:
                 clubs_needed = desired_club_count - club_count
-                print(f"   ➕ Seeding {clubs_needed} bot clubs...")
+                print(f"   ➕ Creating {clubs_needed} bot clubs...")
                 
-                # ✅ Fetch the lowest-level training ground (tier 1, Basic Ground)
-                lowest_trainingground = session.exec(
-                    select(TrainingGround).where(TrainingGround.id == 1)
-                ).first()
-
-
+                # Create clubs for this league
                 for i in range(clubs_needed):
                     bot_club = Club(
                         name=f"Bot Club {league.id}-{i+1}",
@@ -41,9 +85,17 @@ def seed_clubs():
                         is_bot=True,
                         trainingground_id=lowest_trainingground.id
                     )
-                    session.add(bot_club)
+                    new_clubs.append(bot_club)
 
-        session.commit()
+        # ✅ Batch insert all clubs at once
+        if new_clubs:
+            print(f"🚀 Batch creating {len(new_clubs)} clubs...")
+            session.add_all(new_clubs)
+            session.commit()
+            print(f"✅ Created {len(new_clubs)} clubs successfully")
+        else:
+            print("✅ All active leagues already have enough clubs")
+
         print("✅ Club seeding complete!")
 
 

@@ -11,8 +11,7 @@ from tactera_backend.seed.seed_xp_levels import seed_xp_levels
 from tactera_backend.seed.seed_season import seed_seasons
 from tactera_backend.services.generate_fixtures import generate_fixtures_for_league
 from tactera_backend.seed.seed_formations import seed_formation_templates
-
-from sqlmodel import Session
+from sqlmodel import Session, select
 from tactera_backend.core.database import sync_engine
 from tactera_backend.models.league_model import League
 
@@ -46,14 +45,19 @@ def seed_all():
     print("➡️  Step 9: Seeding seasons...")
     seed_seasons()
 
-    print("➡️  Step 10: Generating fixtures for all leagues...")
+    print("➡️  Step 10: Generating fixtures for active leagues only...")
+
     with Session(sync_engine) as session:
-        leagues = session.query(League).all()
-        for league in leagues:
+        # ✅ ONLY generate fixtures for active leagues
+        active_leagues = session.exec(select(League).where(League.is_active == True)).all()
+        print(f"🎯 Found {len(active_leagues)} active leagues for fixture generation")
+        
+        for league in active_leagues:
             print(f"   ⚽ Generating fixtures for {league.name}...")
             generate_fixtures_for_league(session, league.id)
 
-    print("\n✅ Database seeding complete. All leagues initialized with fixtures.\n")
+    print(f"\n✅ Database seeding complete. {len(active_leagues)} active leagues initialized with fixtures.\n")
+
 
 if __name__ == "__main__":
     seed_all()
