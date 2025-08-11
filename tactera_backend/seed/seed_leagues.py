@@ -47,10 +47,12 @@ def seed_leagues():
             # Loop through leagues in this country
             for league_data in country_data["leagues"]:
                 level = league_data["level"]
+                # NEW: Get the active status from country config
+                is_active = country_data.get("active", True)
 
                 # If league has no divisions (tier 1, single table)
                 if "teams" in league_data:
-                    _add_league_if_missing(session, league_data["name"], level, country.id)
+                    _add_league_if_missing(session, league_data["name"], level, country.id, is_active=is_active)
 
                 # If league has multiple divisions (tier 2+)
                 if "divisions" in league_data:
@@ -61,7 +63,8 @@ def seed_leagues():
                             name=league_data["name"],  # base name (e.g., "Division 2")
                             level=level,
                             country_id=country.id,
-                            group=group_num
+                            group=group_num,
+                            is_active=is_active
                         )
 
 
@@ -69,9 +72,10 @@ def seed_leagues():
         print("✅ League seeding complete!")
 
 
-def _add_league_if_missing(session: Session, name: str, level: int, country_id: int, group: Optional[int] = None):
+def _add_league_if_missing(session: Session, name: str, level: int, country_id: int, group: Optional[int] = None, is_active: bool = True):
     """
     Adds a league if it doesn't already exist in the database.
+    NEW: Now includes is_active flag for beta control.
     """
     existing_league = session.exec(
         select(League).where(
@@ -81,17 +85,25 @@ def _add_league_if_missing(session: Session, name: str, level: int, country_id: 
         )
     ).first()
 
-
     if existing_league:
-        print(f"   🔁 League already exists: {name}")
+        # Update existing league's active status if it differs
+        if existing_league.is_active != is_active:
+            existing_league.is_active = is_active
+            session.add(existing_league)
+            session.commit()
+            print(f"   🔄 Updated {name} active status to {is_active}")
+        else:
+            print(f"   🔁 League already exists: {name}")
         return
 
-    # Create new league
-    print(f"   ➕ Adding new league: {name} (level {level})")
-    league = League(name=name, level=level, country_id=country_id, group=group)
+    # Create new league with active status
+    print(f"   ➕ Adding new league: {name} (level {level}, active: {is_active})")
+    league = League(
+        name=name, 
+        level=level, 
+        country_id=country_id, 
+        group=group,
+        is_active=is_active
+    )
     session.add(league)
     session.commit()
-
-
-if __name__ == "__main__":
-    seed_leagues()
