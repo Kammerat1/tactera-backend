@@ -340,3 +340,93 @@ async def calculate_stadium_match_revenue(
             "sold_out_100%": int(revenue_info["capacity"] * 1.0 * revenue_info["ticket_price"])
         }
     }
+    
+@router.get("/club/{club_id}/financial-summary")
+async def get_stadium_financial_summary(
+    club_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get comprehensive financial summary for a club's stadium.
+    Shows current revenue, upgrade costs, and potential returns.
+    """
+    # Get club and stadium
+    club = await db.get(Club, club_id)
+    if not club:
+        raise HTTPException(status_code=404, detail="Club not found")
+    
+    stadium_result = await db.execute(select(Stadium).where(Stadium.club_id == club_id))
+    stadium = stadium_result.scalar_one_or_none()
+    if not stadium:
+        raise HTTPException(status_code=404, detail="Stadium not found")
+    
+    # Get stadium parts for upgrade analysis
+    parts_result = await db.execute(select(StadiumPart).where(StadiumPart.stadium_id == stadium.id))
+    parts = parts_result.scalars().all()
+    
+    # Calculate current revenue scenarios
+    with Session(sync_engine) as session:
+        current_revenue = calculate_match_revenue(
+            session=session,
+            home_club_id=club_id,
+            attendance_percentage=0.8
+        )
+    
+    # Calculate potential revenue after all upgrades
+    stands = [p for p in parts if "stand" in p.type]
+    pitch = next((p for p in parts if p.type == "pitch"), None)
+    
+    # Simulate max upgrade scenario
+    avg_stand_level = sum(p.level for p in stands) / len(stands) if stands else 1
+    max_avg_stand_level = 5  # All stands at level 5
+    
+    # Estimate capacity increase (rough calculation)
+    from tactera_backend.core.stadium_config import LEVEL_TO_CAPACITY
+    potential_capacity = LEVEL_TO_CAPACITY.get(max_avg_stand_level, stadium.capacity)
+    potential_revenue = int(potential_capacity * 0.8 * stadium.base_ticket_price)
+    
+    # Calculate upgrade costs (placeholder - you can adjust these)
+    stands_needing_upgrade = sum(1 for stand in stands if stand.level < 5)
+    pitch_needs_upgrade = pitch.level < 5 if pitch else False
+    
+    estimated_upgrade_cost = stands_needing_upgrade * 50000 + (25000 if pitch_needs_upgrade else 0)
+    
+    return {
+        "club_info": {
+            "id": club.id,
+            "name": club.name,
+            "current_money": club.money
+        },
+        "stadium_info": {
+            "name": stadium.name,
+            "current_capacity": stadium.capacity,
+            "current_pitch_quality": stadium.pitch_quality,
+            "ticket_price": stadium.base_ticket_price
+        },
+        "current_revenue": {
+            "per_match": current_revenue.get("total_revenue", 0) if current_revenue["success"] else 0,
+            "per_season": (current_revenue.get("total_revenue", 0) * 34) if current_revenue["success"] else 0,
+            "attendance_breakdown": {
+                "50%_attendance": int(stadium.capacity * 0.5 * stadium.base_ticket_price),
+                "80%_attendance": int(stadium.capacity * 0.8 * stadium.base_ticket_price),
+                "100%_sold_out": int(stadium.capacity * 1.0 * stadium.base_ticket_price)
+            }
+        },
+        "upgrade_potential": {
+            "max_capacity_after_upgrades": potential_capacity,
+            "potential_revenue_per_match": potential_revenue,
+            "potential_revenue_per_season": potential_revenue * 34,
+            "revenue_increase_per_match": potential_revenue - (current_revenue.get("total_revenue", 0) if current_revenue["success"] else 0),
+            "estimated_upgrade_cost": estimated_upgrade_cost,
+            "payback_period_matches": int(estimated_upgrade_cost / max(1, potential_revenue - (current_revenue.get("total_revenue", 0) if current_revenue["success"] else 0)))
+        },
+        "stadium_parts": [
+            {
+                "type": part.type,
+                "current_level": part.level,
+                "max_level": 5,
+                "needs_upgrade": part.level < 5
+            }
+            for part in parts
+        ]
+    }
