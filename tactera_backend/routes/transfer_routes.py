@@ -675,3 +675,80 @@ def offer_contract(
         }
     else:
         raise HTTPException(status_code=404, detail="Player must have an existing contract to renew")
+    
+@router.get("/clubs/{club_id}/financial-status")
+def get_club_transfer_financial_status(
+    club_id: int,
+    session: Session = Depends(get_session)
+):
+    """
+    Get a club's financial status for transfer activities.
+    Shows current money, spending recommendations, and transfer history.
+    """
+    club = session.get(Club, club_id)
+    if not club:
+        raise HTTPException(status_code=404, detail="Club not found")
+    
+    # Calculate spending recommendations
+    current_money = club.money
+    conservative_limit = int(current_money * 0.3)  # 30% of money
+    moderate_limit = int(current_money * 0.5)      # 50% of money
+    aggressive_limit = int(current_money * 0.8)    # 80% of money
+    
+    # Get recent transfer activity for this club
+    recent_sales = session.exec(
+        select(TransferListing).where(
+            TransferListing.club_id == club_id,
+            TransferListing.status == AuctionStatus.COMPLETED
+        ).limit(5)
+    ).all()
+    
+    recent_purchases = session.exec(
+        select(TransferListing).where(
+            TransferListing.winning_club_id == club_id,
+            TransferListing.status == AuctionStatus.COMPLETED
+        ).limit(5)
+    ).all()
+    
+    # Calculate transfer balance
+    total_sales_income = sum(listing.winning_bid or 0 for listing in recent_sales)
+    total_purchase_cost = sum(listing.winning_bid or 0 for listing in recent_purchases)
+    transfer_balance = total_sales_income - total_purchase_cost
+    
+    return {
+        "club_info": {
+            "id": club.id,
+            "name": club.name,
+            "current_money": current_money
+        },
+        "spending_recommendations": {
+            "conservative_max": {
+                "amount": conservative_limit,
+                "description": "Safe spending (30% of money)",
+                "risk_level": "Low"
+            },
+            "moderate_max": {
+                "amount": moderate_limit,
+                "description": "Balanced spending (50% of money)",
+                "risk_level": "Medium"
+            },
+            "aggressive_max": {
+                "amount": aggressive_limit,
+                "description": "High spending (80% of money)",
+                "risk_level": "High - leaves little emergency money"
+            }
+        },
+        "transfer_activity": {
+            "recent_sales_count": len(recent_sales),
+            "recent_purchases_count": len(recent_purchases),
+            "total_sales_income": total_sales_income,
+            "total_purchase_cost": total_purchase_cost,
+            "net_transfer_balance": transfer_balance,
+            "balance_status": "Profit" if transfer_balance > 0 else "Loss" if transfer_balance < 0 else "Neutral"
+        },
+        "financial_health": {
+            "status": "Excellent" if current_money > 200000 else "Good" if current_money > 100000 else "Fair" if current_money > 50000 else "Poor",
+            "warning": "Low funds - be careful with transfers" if current_money < 50000 else None,
+            "daily_expenses": "Consider checking daily wage costs" if current_money < 25000 else None
+        }
+    }
