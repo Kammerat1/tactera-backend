@@ -259,6 +259,18 @@ def get_transfer_listing_details(
     now = datetime.utcnow()
     minutes_remaining = max(0, int((listing.auction_end - now).total_seconds() / 60))
     
+    # =========================================
+    # 💰 NEW: Add financial information for bidding context
+    # =========================================
+    # TODO: Get viewing club from authenticated manager (placeholder for now)
+    viewing_club_id = 1  # Placeholder until auth implemented
+    viewing_club = session.get(Club, viewing_club_id)
+    
+    # Calculate financial recommendations
+    can_afford_current = viewing_club and viewing_club.money >= listing.current_bid
+    can_afford_next_bid = viewing_club and viewing_club.money >= (listing.current_bid + 1)
+    recommended_max_bid = int(viewing_club.money * 0.3) if viewing_club else 0  # Don't spend more than 30% of money
+    
     return {
     "listing": {
         "id": listing.id,
@@ -287,7 +299,14 @@ def get_transfer_listing_details(
         "id": selling_club.id,
         "name": selling_club.name
     } if selling_club else None,
-    "bids": [TransferBidRead.from_orm(bid) for bid in bids[:10]]  # Last 10 bids
+    "bids": [TransferBidRead.from_orm(bid) for bid in bids[:10]],  # Last 10 bids
+    "financial_info": {
+        "viewing_club_money": viewing_club.money if viewing_club else 0,
+        "can_afford_current_bid": can_afford_current,
+        "can_afford_next_bid": can_afford_next_bid,
+        "recommended_max_bid": recommended_max_bid,
+        "financial_advice": "Conservative: spend max 30% of club money on transfers" if viewing_club else None
+    }
 }
 
 
