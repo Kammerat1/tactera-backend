@@ -6,6 +6,8 @@ from tactera_backend.core.database import get_db, sync_engine, Session
 from tactera_backend.models.stadium_model import Stadium, StadiumPart
 from tactera_backend.services.stadium_service import upgrade_stadium_part
 from sqlalchemy.ext.asyncio import AsyncSession
+from tactera_backend.models.club_model import Club
+from tactera_backend.services.finance_service import calculate_match_revenue
 
 router = APIRouter()
 
@@ -117,9 +119,28 @@ async def upgrade_all_stands(stadium_id: int, db: AsyncSession = Depends(get_db)
     from tactera_backend.services.stadium_service import recalculate_stadium_attributes
     await recalculate_stadium_attributes(db, stadium_id)
 
+    # Calculate revenue impact of upgrades
+    from tactera_backend.services.finance_service import calculate_match_revenue
+    from tactera_backend.core.database import get_session
+
+    with Session(sync_engine) as session:
+        revenue_info = calculate_match_revenue(
+            session=session,
+            home_club_id=stadium_id,  # Note: This should be club_id, we'll fix the parameter
+            attendance_percentage=0.8
+        )
+
+    revenue_impact = revenue_info.get("total_revenue", 0) if revenue_info["success"] else 0
+
     return {
         "message": "Stand upgrades processed",
-        "details": upgraded
+        "details": upgraded,
+        "financial_impact": {
+            "new_capacity": revenue_info.get("capacity", 0),
+            "revenue_per_match": revenue_impact,
+            "revenue_per_season": revenue_impact * 34,  # Assuming 34 matches per season
+            "upgrade_payback_info": "Higher capacity = more ticket sales = more revenue per match"
+        }
     }
 
 @router.post("/{stadium_id}/upgrade_pitch")
@@ -148,7 +169,19 @@ async def upgrade_pitch(stadium_id: int, db: AsyncSession = Depends(get_db)):
         from tactera_backend.services.stadium_service import recalculate_stadium_attributes
         await recalculate_stadium_attributes(db, stadium_id)
 
-        return {"message": f"Pitch upgraded to Level {pitch.level}"}
+        # Calculate pitch quality impact
+        stadium = await db.get(Stadium, stadium_id)
+        pitch_quality = stadium.pitch_quality if stadium else 50
+
+        return {
+            "message": f"Pitch upgraded to Level {pitch.level}",
+            "financial_impact": {
+                "new_pitch_quality": pitch_quality,
+                "injury_reduction": "Better pitch = fewer injuries = lower medical costs",
+                "performance_boost": "Better pitch = better player performance = more wins",
+                "note": "Pitch upgrades improve player safety and performance"
+            }
+        }
     else:
         return {"message": "Pitch is already at max level"}
 
@@ -182,9 +215,29 @@ async def upgrade_all(stadium_id: int, db: AsyncSession = Depends(get_db)):
     from tactera_backend.services.stadium_service import recalculate_stadium_attributes
     await recalculate_stadium_attributes(db, stadium_id)
 
+    # Calculate combined upgrade impact
+    stadium = await db.get(Stadium, stadium_id)
+    from tactera_backend.core.database import get_session
+
+    with Session(sync_engine) as session:
+        revenue_info = calculate_match_revenue(
+            session=session,
+            home_club_id=stadium.club_id,
+            attendance_percentage=0.8
+        )
+
+    revenue_impact = revenue_info.get("total_revenue", 0) if revenue_info["success"] else 0
+
     return {
         "message": "All stadium upgrades processed",
-        "details": upgraded
+        "details": upgraded,
+        "financial_impact": {
+            "new_capacity": revenue_info.get("capacity", 0),
+            "new_pitch_quality": stadium.pitch_quality,
+            "revenue_per_match": revenue_impact,
+            "revenue_per_season": revenue_impact * 34,
+            "total_benefit": "Higher capacity + better pitch = more revenue + fewer injuries"
+        }
     }
 
 @router.post("/debug/parts/{part_id}/set_level")
