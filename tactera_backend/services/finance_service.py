@@ -148,3 +148,48 @@ def get_club_finances(session: Session, club_id: int) -> dict:
         "days_until_bankruptcy": int(days_until_bankruptcy) if days_until_bankruptcy != float('inf') else None,
         "financial_status": "healthy" if days_until_bankruptcy > 30 else "warning" if days_until_bankruptcy > 7 else "critical"
     }
+    
+def calculate_match_revenue(session: Session, home_club_id: int, attendance_percentage: float = 0.75) -> dict:
+    """
+    Calculate match revenue for the home club based on stadium capacity.
+    
+    Args:
+        session: Database session
+        home_club_id: ID of the home club
+        attendance_percentage: Percentage of stadium filled (0.0 to 1.0)
+    
+    Returns:
+        dict with revenue details
+    """
+    from tactera_backend.models.stadium_model import Stadium
+    
+    # Get home club
+    club = session.get(Club, home_club_id)
+    if not club:
+        return {"success": False, "message": "Club not found"}
+    
+    # Get home stadium
+    stadium = session.exec(
+        select(Stadium).where(Stadium.club_id == home_club_id)
+    ).first()
+    
+    if not stadium:
+        return {"success": False, "message": "Stadium not found"}
+    
+    # Calculate attendance and revenue
+    max_attendance = stadium.capacity
+    actual_attendance = int(max_attendance * attendance_percentage)
+    
+    # Revenue = attendance × ticket price
+    total_revenue = actual_attendance * stadium.base_ticket_price
+    
+    return {
+        "success": True,
+        "stadium_name": stadium.name,
+        "capacity": max_attendance,
+        "attendance": actual_attendance,
+        "attendance_percentage": int(attendance_percentage * 100),
+        "ticket_price": stadium.base_ticket_price,
+        "total_revenue": int(total_revenue),
+        "club_id": home_club_id
+    }
