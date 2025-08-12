@@ -205,11 +205,25 @@ def get_all_transfer_activity(
             "asking_price": listing.asking_price
         })
     
+    # =========================================
+    # 💰 NEW: Add financial context for the viewing club
+    # =========================================
+    # TODO: Get viewing club from authenticated manager (placeholder for now)
+    viewing_club_id = 1  # Placeholder until auth implemented
+    viewing_club = session.get(Club, viewing_club_id)
+    
     return {
         "active_auctions": auction_data,
         "transfer_list": transfer_list_data,
         "total_auctions": len(auction_data),
-        "total_transfer_list": len(transfer_list_data)
+        "total_transfer_list": len(transfer_list_data),
+        "financial_context": {
+            "viewing_club_id": viewing_club_id,
+            "viewing_club_name": viewing_club.name if viewing_club else "Unknown",
+            "current_money": viewing_club.money if viewing_club else 0,
+            "affordable_auctions": len([a for a in auction_data if viewing_club and a["current_bid"] <= viewing_club.money]),
+            "affordable_transfer_list": len([t for t in transfer_list_data if viewing_club and t["asking_price"] <= viewing_club.money])
+        }
     }
 
 
