@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
-from tactera_backend.core.database import get_db
+from tactera_backend.core.database import get_db, sync_engine, Session
 from tactera_backend.models.stadium_model import Stadium, StadiumPart
 from tactera_backend.services.stadium_service import upgrade_stadium_part
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -246,4 +246,44 @@ async def debug_reset_stadium(stadium_id: int, db: AsyncSession = Depends(get_db
     return {
         "message": "DEBUG: Stadium fully reset to Level 1",
         "details": reset_list
+    }
+
+@router.get("/club/{club_id}/match-revenue")
+async def calculate_stadium_match_revenue(
+    club_id: int, 
+    attendance_percentage: float = 0.8,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Calculate potential match revenue for a club's stadium.
+    Useful for testing and showing revenue projections.
+    """
+    from tactera_backend.services.finance_service import calculate_match_revenue
+    from tactera_backend.core.database import get_session
+    
+    # Use sync session for finance service
+    with Session(sync_engine) as session:
+        revenue_info = calculate_match_revenue(
+            session=session,
+            home_club_id=club_id,
+            attendance_percentage=attendance_percentage
+        )
+    
+    if not revenue_info["success"]:
+        raise HTTPException(status_code=404, detail=revenue_info["message"])
+    
+    # Get current club money for context
+    club = await db.get(Club, club_id)
+    
+    return {
+        "club_id": club_id,
+        "club_name": club.name if club else "Unknown",
+        "current_money": club.money if club else 0,
+        "stadium_revenue_projection": revenue_info,
+        "revenue_scenarios": {
+            "poor_attendance_50%": int(revenue_info["capacity"] * 0.5 * revenue_info["ticket_price"]),
+            "average_attendance_75%": int(revenue_info["capacity"] * 0.75 * revenue_info["ticket_price"]),
+            "excellent_attendance_95%": int(revenue_info["capacity"] * 0.95 * revenue_info["ticket_price"]),
+            "sold_out_100%": int(revenue_info["capacity"] * 1.0 * revenue_info["ticket_price"])
+        }
     }
