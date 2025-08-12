@@ -16,6 +16,7 @@ from tactera_backend.core.injury_config import REINJURY_MULTIPLIER
 from tactera_backend.core.config import TEST_MODE
 from tactera_backend.models.suspension_model import Suspension
 from tactera_backend.models.formation_model import ClubFormation, FormationTemplate, MatchSquad, MatchSubstitution
+from tactera_backend.core.database import sync_engine
 
 # =========================================
 # 🟨🟥 Booking & Suspension Configuration
@@ -458,16 +459,38 @@ async def simulate_match_with_substitutions(db: AsyncSession, fixture_id: int):
     await db.commit()
     await db.refresh(fixture)
     
-    if TEST_MODE:
-        total_injuries = len(injuries)
-        reinjury_count = sum(1 for inj in injuries if inj["reinjury"])
-        print(f"\n📊 Enhanced Match Summary:")
-        print(f"   Score: {home_goals}-{away_goals}")
-        print(f"   Injuries: {total_injuries} total ({total_injuries - reinjury_count} new, {reinjury_count} reinjuries)")
-        print(f"   Send-offs: {len(send_offs)}")
-        print(f"   Substitutions: {len(substitutions)}")
-        print(f"   New suspensions: {len(newly_suspended_players)}")
-        print("🏁 Enhanced match simulation complete!\n")
+    # =========================================
+    # 💰 NEW: Calculate and add match revenue for home club
+    # =========================================
+    from tactera_backend.services.finance_service import calculate_match_revenue, add_revenue
+
+    # Calculate revenue based on stadium and attendance
+    revenue_info = calculate_match_revenue(
+        session=Session(sync_engine),  # Use sync session for finance service
+        home_club_id=fixture.home_club_id,
+        attendance_percentage=0.8  # 80% attendance for now (we can make this dynamic later)
+    )
+
+    match_revenue = 0
+    if revenue_info["success"]:
+        match_revenue = revenue_info["total_revenue"]
+        
+        # Add revenue to home club using sync session
+        with Session(sync_engine) as sync_session:
+            add_revenue(sync_session, fixture.home_club_id, match_revenue, "match_revenue")
+        
+        if TEST_MODE:
+            total_injuries = len(injuries)
+            reinjury_count = sum(1 for inj in injuries if inj["reinjury"])
+            print(f"\n📊 Enhanced Match Summary:")
+            print(f"   Score: {home_goals}-{away_goals}")
+            print(f"   Injuries: {total_injuries} total ({total_injuries - reinjury_count} new, {reinjury_count} reinjuries)")
+            print(f"   Send-offs: {len(send_offs)}")
+            print(f"   Substitutions: {len(substitutions)}")
+            print(f"   New suspensions: {len(newly_suspended_players)}")
+            print("🏁 Enhanced match simulation complete!\n")
+            print(f"   💰 Match Revenue: {revenue_info['stadium_name']} - {revenue_info['attendance']:,} fans")
+            print(f"      Ticket price: ${revenue_info['ticket_price']:.2f} × {revenue_info['attendance']:,} = ${match_revenue:,}")
 
     return {
         "fixture_id": fixture.id,
@@ -480,6 +503,10 @@ async def simulate_match_with_substitutions(db: AsyncSession, fixture_id: int):
         "bookings": bookings_payload,
         "send_offs": send_offs,
         "substitutions": substitutions,  # NEW: Include substitution events
+        "match_revenue": {
+        "home_club_revenue": match_revenue,
+        "stadium_info": revenue_info if revenue_info["success"] else None
+    },
         
         # Formation information with squad details
         "formations": {
