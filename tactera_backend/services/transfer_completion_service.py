@@ -161,6 +161,42 @@ async def complete_single_auction(db: AsyncSession, listing: TransferListing) ->
     
     # Transfer the player
     player.club_id = new_club_id
+    
+    # =========================================
+    # 💰 NEW: Transfer money between clubs
+    # =========================================
+    # Check if buying club has enough money
+    if buying_club.money < transfer_fee:
+        # Cancel transfer due to insufficient funds
+        listing.status = AuctionStatus.CANCELLED
+        db.add(listing)
+        
+        return {
+            "listing_id": listing.id,
+            "status": "cancelled",
+            "reason": f"Buying club insufficient funds (has ${buying_club.money:,}, needs ${transfer_fee:,})",
+            "buying_club": buying_club.name,
+            "shortfall": transfer_fee - buying_club.money
+        }
+
+    # Execute money transfer
+    buying_club.money -= transfer_fee
+    selling_club.money += transfer_fee
+
+    # Log the financial transaction
+    financial_info = {
+        "transfer_fee": transfer_fee,
+        "buying_club_before": buying_club.money + transfer_fee,  # What they had before
+        "buying_club_after": buying_club.money,
+        "selling_club_before": selling_club.money - transfer_fee,  # What they had before  
+        "selling_club_after": selling_club.money
+    }
+
+    # Save club money changes
+    db.add(buying_club)
+    db.add(selling_club)
+
+    print(f"💰 Transfer fee: ${transfer_fee:,} from {buying_club.name} to {selling_club.name}")
 
     # Handle contract - update existing or create new
     old_contract_result = await db.execute(
@@ -202,14 +238,15 @@ async def complete_single_auction(db: AsyncSession, listing: TransferListing) ->
     # Contract is already added in the if/else block above
     
     return {
-        "listing_id": listing.id,
-        "status": "completed",
-        "player_id": player.id,
-        "player_name": f"{player.first_name} {player.last_name}",
-        "from_club": selling_club.name,
-        "to_club": buying_club.name,
-        "transfer_fee": transfer_fee,
-        "winning_bid_id": winning_bid.id
+    "listing_id": listing.id,
+    "status": "completed",
+    "player_id": player.id,
+    "player_name": f"{player.first_name} {player.last_name}",
+    "from_club": selling_club.name,
+    "to_club": buying_club.name,
+    "transfer_fee": transfer_fee,
+    "winning_bid_id": winning_bid.id,
+    "financial_transaction": financial_info  # NEW: Include financial details
     }
 
 async def run_transfer_completion_loop():
