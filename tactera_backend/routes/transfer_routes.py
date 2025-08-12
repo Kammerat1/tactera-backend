@@ -430,6 +430,35 @@ def place_bid(
             status_code=400, 
             detail=f"Bid must be at least {minimum_bid}"
         )
+        
+    # =========================================
+    # 💰 NEW: Validate club has enough money for the bid
+    # =========================================
+    # TODO: Get bidding club from authenticated manager (placeholder for now)
+    bidding_club = session.get(Club, bidding_club_id)
+    if not bidding_club:
+        raise HTTPException(status_code=404, detail="Bidding club not found")
+
+    # Check if club has enough money for this bid
+    if bidding_club.money < request.bid_amount:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "Insufficient funds",
+                "bid_amount": request.bid_amount,
+                "club_money": bidding_club.money,
+                "shortfall": request.bid_amount - bidding_club.money,
+                "message": f"Your club has ${bidding_club.money:,} but the bid requires ${request.bid_amount:,}"
+            }
+        )
+
+    # Show warning if bid would use significant portion of club's money
+    money_percentage = (request.bid_amount / bidding_club.money) * 100 if bidding_club.money > 0 else 100
+    financial_warning = None
+    if money_percentage > 80:
+        financial_warning = f"Warning: This bid would use {money_percentage:.1f}% of your club's money"
+    elif money_percentage > 50:
+        financial_warning = f"Notice: This bid would use {money_percentage:.1f}% of your club's money"
     
     # Check if this is a transfer list trigger
     if listing.transfer_type == TransferType.TRANSFER_LIST and listing.current_bid == 0:
@@ -486,10 +515,16 @@ def place_bid(
     minutes_remaining = max(0, int((listing.auction_end - now).total_seconds() / 60))
     
     response = {
-        "message": "Bid placed successfully",
-        "bid_id": bid.id,
-        "new_highest_bid": listing.current_bid,
-        "minutes_remaining": minutes_remaining
+    "message": "Bid placed successfully",
+    "bid_id": bid.id,
+    "new_highest_bid": listing.current_bid,
+    "minutes_remaining": minutes_remaining,
+    "financial_impact": {
+        "bid_amount": request.bid_amount,
+        "club_money_before": bidding_club.money,
+        "club_money_after_if_won": bidding_club.money - request.bid_amount,
+        "warning": financial_warning
+    }
     }
     
     # Add special message for transfer list triggers
