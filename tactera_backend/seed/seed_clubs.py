@@ -106,7 +106,7 @@ def seed_clubs():
                     bot_club = Club(
                         name=f"Bot Club {league.id}-{i+1}",
                         league_id=league.id,
-                        manager_email=f"bot_{league.id}_{i+1}@bots.tactera",
+                        manager_email=f"bot{league.id}_{i+1}@test.dk",
                         is_bot=True,
                         trainingground_id=lowest_trainingground.id,
                         money=starting_money
