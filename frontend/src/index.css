@@ -1,0 +1,89 @@
+/* PLEASE NOTE: THESE TAILWIND IMPORTS SHOULD NEVER BE DELETED */
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
+/* DO NOT DELETE THESE TAILWIND IMPORTS, OTHERWISE THE STYLING WILL NOT RENDER AT ALL */
+
+/* Custom scrollbar styles */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1f2937;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #4b5563;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
+}
+
+/* Smooth focus transitions */
+@layer base {
+  * {
+    @apply focus:outline-none;
+  }
+  
+  input:focus,
+  button:focus,
+  select:focus,
+  textarea:focus {
+    @apply ring-2 ring-blue-500 ring-opacity-50 transition-all duration-200;
+  }
+}
+
+/* Card hover animations */
+@layer components {
+  .card-hover {
+    @apply transition-all duration-300 ease-out hover:transform hover:scale-[1.02] hover:shadow-xl;
+  }
+  
+  .card-hover-subtle {
+    @apply transition-all duration-200 ease-out hover:transform hover:scale-[1.01] hover:shadow-lg;
+  }
+  
+  .button-hover {
+    @apply transition-all duration-200 ease-out hover:transform hover:scale-105 active:scale-95;
+  }
+}
+
+/* Loading animations */
+@keyframes pulse-slow {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+.loading-shimmer {
+  animation: shimmer 2s infinite linear;
+  background: linear-gradient(to right, #374151 4%, #4b5563 25%, #374151 36%);
+  background-size: 1000px 100%;
+}
+
+.pulse-slow {
+  animation: pulse-slow 3s ease-in-out infinite;
+}
+
+/* Table row hover effects */
+.table-row-hover {
+  @apply transition-all duration-200 hover:bg-gray-700/50 hover:transform hover:scale-[1.005];
+}
